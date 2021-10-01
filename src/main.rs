@@ -21,13 +21,6 @@ use tokio::net::UdpSocket;
 use tokio::time::Duration;
 
 
-#[derive(Clone)]
-struct UdpConn {
-    conn: Arc<dyn Conn + Send + Sync>,
-    port: u16,
-    payload_type: u8,
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("start");
@@ -125,35 +118,6 @@ async fn webrtc_to_nats() -> Result<()> {
         .add_transceiver_from_kind(RTPCodecType::Video, &[])
         .await?;
 
-    // Prepare udp conns
-    // Also update incoming packets with expected PayloadType, the browser may use
-    // a different value. We have to modify so our stream matches what rtp-forwarder.sdp expects
-    // let mut udp_conns = HashMap::new();
-    // udp_conns.insert(
-    //     "audio".to_owned(),
-    //     UdpConn {
-    //         conn: {
-    //             let sock = UdpSocket::bind("127.0.0.1:0").await?;
-    //             sock.connect(format!("127.0.0.1:{}", 4000)).await?;
-    //             Arc::new(sock)
-    //         },
-    //         port: 4000,
-    //         payload_type: 111,
-    //     },
-    // );
-    // udp_conns.insert(
-    //     "video".to_owned(),
-    //     UdpConn {
-    //         conn: {
-    //             let sock = UdpSocket::bind("127.0.0.1:0").await?;
-    //             sock.connect(format!("127.0.0.1:{}", 4002)).await?;
-    //             Arc::new(sock)
-    //         },
-    //         port: 4002,
-    //         payload_type: 96,
-    //     },
-    // );
-
     // Set a handler for when a new remote track starts, this handler will forward data to
     // our UDP listeners.
     // In your application this is where you would handle/process audio/video
@@ -193,49 +157,6 @@ async fn webrtc_to_nats() -> Result<()> {
                         }
                         Result::<()>::Ok(())
                     });
-
-                    // // Retrieve udp connection
-                    // let c = if let Some(c) = udp_conns.get(&track.kind().to_string()) {
-                    //     c.clone()
-                    // } else {
-                    //     return Box::pin(async {});
-                    // };
-
-                    // tokio::spawn(async move {
-                    //     let mut b = vec![0u8; 1500];
-                    //     while let Ok((n, _)) = track.read(&mut b).await {
-                    //         // Unmarshal the packet and update the PayloadType
-                    //         let mut buf = &b[..n];
-                    //         let mut rtp_packet = rtp::packet::Packet::unmarshal(&mut buf)?;
-                    //         rtp_packet.header.payload_type = c.payload_type;
-
-                    //         // Marshal into original buffer with updated PayloadType
-
-                    //         let n = rtp_packet.marshal_to(&mut b)?;
-
-                    //         // Write
-                    //         if let Err(err) = c.conn.send(&b[..n]).await {
-                    //             // For this particular example, third party applications usually timeout after a short
-                    //             // amount of time during which the user doesn't have enough time to provide the answer
-                    //             // to the browser.
-                    //             // That's why, for this particular example, the user first needs to provide the answer
-                    //             // to the browser then open the third party application. Therefore we must not kill
-                    //             // the forward on "connection refused" errors
-                    //             //if opError, ok := err.(*net.OpError); ok && opError.Err.Error() == "write: connection refused" {
-                    //             //    continue
-                    //             //}
-                    //             //panic(err)
-                    //             if err.to_string().contains("Connection refused") {
-                    //                 continue;
-                    //             } else {
-                    //                 println!("conn send err: {}", err);
-                    //                 break;
-                    //             }
-                    //         }
-                    //     }
-
-                    //     Result::<()>::Ok(())
-                    // });
                 }
 
                 Box::pin(async {})
