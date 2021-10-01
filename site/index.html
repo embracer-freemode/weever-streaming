@@ -1,0 +1,93 @@
+local offer: <br/><textarea id="localSessionDescription" readonly="true"></textarea>
+<br/>
+
+remote answer: <br/><textarea id="remoteSessionDescription" readonly="true"></textarea>
+<br/>
+
+<button onclick="window.startSession()"> Start Session </button><br />
+<br/>
+
+Video <br/>
+<div id="remoteVideos"></div> <br />
+
+Logs <br/>
+<div id="div"></div>
+
+
+<script>
+var x = "";
+let pc = new RTCPeerConnection({
+  iceServers: [
+    {
+      urls: 'stun:stun.l.google.com:19302'
+    }
+  ]
+})
+let log = msg => {
+  document.getElementById('div').innerHTML += msg + '<br>'
+}
+
+var foo = [];
+pc.ontrack = function (event) {
+  let id = event.streams[0].id
+  var div;
+  div = document.getElementById(`media-${id}`)
+  if (div == null) {
+    div = document.createElement("div")
+    div.id = `media-${id}`
+    div.textContent = id
+  }
+
+
+  foo.push(event);
+
+  // video or audio here
+  let media = document.createElement(event.track.kind)
+
+  // TODO: multiple media streams?
+  media.srcObject = event.streams[0]
+  media.autoplay = true
+  media.controls = true
+
+  div.appendChild(media)
+  document.getElementById('remoteVideos').appendChild(div)
+}
+
+pc.oniceconnectionstatechange = e => log(pc.iceConnectionState)
+pc.onicecandidate = event => {
+  if (event.candidate === null) {
+    document.getElementById('localSessionDescription').value = pc.localDescription.sdp
+  }
+}
+
+// Offer to receive 2 video tracks
+pc.addTransceiver('video', {'direction': 'recvonly'})
+pc.addTransceiver('video', {'direction': 'recvonly'})
+pc.createOffer().then(d => pc.setLocalDescription(d)).catch(log)
+
+window.startSession = () => {
+  let offer = document.getElementById('localSessionDescription').value;
+
+  fetch("/sub/1234/all", {
+    method: "POST",
+    body: offer,
+    headers: {
+      "Content-Type": "application/sdp",
+      "Authorization": "Bearer <token>",
+    },
+  }).then(res => {
+    log("Request complete! response:", res);
+    res.text().then(function(answer) {
+      document.getElementById("remoteSessionDescription").value = answer;
+      pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}))
+    })
+  });
+}
+</script>
+
+<style>
+textarea {
+    width: 500px;
+    min-height: 375px;
+}
+</style>

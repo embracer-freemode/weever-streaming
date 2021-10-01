@@ -1,7 +1,9 @@
+//! WebRTC SFU with horizontal scale design
+
 use anyhow::Result;
+use log::{info, warn};
 use interceptor::registry::Registry;
 use rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
-use webrtc_util::{Conn, Marshal, Unmarshal};
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS, MIME_TYPE_VP8};
 use webrtc::api::APIBuilder;
@@ -15,40 +17,42 @@ use webrtc::peer::ice::ice_connection_state::RTCIceConnectionState;
 use webrtc::peer::ice::ice_server::RTCIceServer;
 use webrtc::peer::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer::sdp::session_description::RTCSessionDescription;
+use webrtc::peer::sdp::sdp_type::RTCSdpType;
 use std::sync::Arc;
 use std::collections::HashMap;
-use tokio::net::UdpSocket;
 use tokio::time::Duration;
+use tokio::sync::oneshot::Sender;
+use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
+use actix_web_httpauth::extractors::bearer::BearerAuth;
+// use actix_cors::Cors;
+use actix_files::Files;
+use serde::{Deserialize, Serialize};
 
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    println!("start");
-    // webrtc_to_nats().await?;
-    nats_to_webrtc().await?;
+fn main() -> Result<()> {
+    // TODO: use tracking crate with more span info
+    env_logger::init();
+    web_main()?;
     Ok(())
 }
 
-// Wait for the offer to be pasted
-// for this experiement, we past SDP offer with base64 encoded in
-fn get_sdp() -> Result<String> {
-    println!("past SDP in:");
-    let mut line = String::new();
-    std::io::stdin().read_line(&mut line)?;
-    println!("raw: |{}|", line);
-    line = line.trim().to_owned();
-    let b = base64::decode(line)?;
-    let s = String::from_utf8(b)?;
-    println!("decoded: {}", s);
-    Ok(s)
-}
+/// Extract RTP streams from WebRTC, and send it to NATS
+///
+/// based on [rtp-forwarder](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-forwarder) example
+async fn webrtc_to_nats(offer: String, answer_tx: Sender<String>, subject: String) -> Result<()> {
+    // build SDP Offer type
+    let mut sdp = RTCSessionDescription::default();
+    sdp.sdp_type = RTCSdpType::Offer;
+    sdp.sdp = offer;
+    let offer = sdp;
 
-// based on rtp-forwarder
-async fn webrtc_to_nats() -> Result<()> {
     // NATS
+    // TODO: share NATS connection
+    info!("connecting NATS");
     let nc = nats::asynk::connect("localhost").await?;
 
     // Create a MediaEngine object to configure the supported codec
+    info!("creating MediaEngine");
     let mut m = MediaEngine::default();
 
     // Setup the codecs you want to use.
@@ -99,6 +103,7 @@ async fn webrtc_to_nats() -> Result<()> {
         .build();
 
     // Prepare the configuration
+    info!("preparing RTCConfiguration");
     let config = RTCConfiguration {
         ice_servers: vec![RTCIceServer {
             urls: vec!["stun:stun.l.google.com:19302".to_owned()],
@@ -148,12 +153,11 @@ async fn webrtc_to_nats() -> Result<()> {
 
                     let nc = nc.clone();
                     // push RTP to NATS
+                    let subject = subject.clone();  // TODO: avoid this?
                     tokio::spawn(async move {
                         let mut b = vec![0u8; 1500];
                         while let Ok((n, _)) = track.read(&mut b).await {
-                            // this is working
-                            // println!("nats publish");
-                            nc.publish("my.subject", &b[..n]).await?;
+                            nc.publish(&subject, &b[..n]).await?;
                         }
                         Result::<()>::Ok(())
                     });
@@ -201,13 +205,12 @@ async fn webrtc_to_nats() -> Result<()> {
         }))
         .await;
 
-    let desc_data = get_sdp()?;
-    let offer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
-
     // Set the remote SessionDescription
+    info!("PC set remote SDP");
     peer_connection.set_remote_description(offer).await?;
 
     // Create an answer
+    info!("PC create local SDP");
     let answer = peer_connection.create_answer(None).await?;
 
     // Create channel that is blocked until ICE Gathering is complete
@@ -221,28 +224,37 @@ async fn webrtc_to_nats() -> Result<()> {
     // in a production application you should exchange ICE Candidates via OnICECandidate
     let _ = gather_complete.recv().await;
 
-    // Output the answer in base64 so we can paste it in browser
+    // Send out the SDP answer via Sender
     if let Some(local_desc) = peer_connection.local_description().await {
-        let json_str = serde_json::to_string(&local_desc)?;
-        let b64 = base64::encode(&json_str);
-        println!("{}", b64);
+        info!("PC send local SDP");
+        answer_tx.send(local_desc.sdp);
     } else {
-        println!("generate local_description failed!");
+        warn!("generate local_description failed!");
     }
 
-    println!("Press ctlr-c to stop");
-    tokio::signal::ctrl_c().await.unwrap();
-
+    // TODO: a signal to close connection?
+    info!("PC wait");
+    tokio::time::sleep(Duration::from_secs(3000)).await;
     peer_connection.close().await?;
 
     Ok(())
 }
 
-// based on rtp-to-webrtc
-async fn nats_to_webrtc() -> Result<()> {    // Create a MediaEngine object to configure the supported codec
+/// Pull RTP streams from NATS, and send it to WebRTC
+///
+// based on [rtp-to-webrtc](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-to-webrtc)
+async fn nats_to_webrtc(offer: String, answer_tx: Sender<String>, subject: String) -> Result<()> {
+    // build SDP Offer type
+    let mut sdp = RTCSessionDescription::default();
+    sdp.sdp_type = RTCSdpType::Offer;
+    sdp.sdp = offer;
+    let offer = sdp;
+
     // NATS
+    // TODO: share NATS connection
     let nc = nats::asynk::connect("localhost").await?;
 
+    // Create a MediaEngine object to configure the supported codec
     let mut m = MediaEngine::default();
 
     // m.register_default_codecs()?;
@@ -304,18 +316,30 @@ async fn nats_to_webrtc() -> Result<()> {    // Create a MediaEngine object to c
     let peer_connection = Arc::new(api.new_peer_connection(config).await?);
 
     // Create Track that we send video back to browser on
+    // TODO: dynamic creation
     let video_track = Arc::new(TrackLocalStaticRTP::new(
         RTCRtpCodecCapability {
             mime_type: MIME_TYPE_VP8.to_owned(),
             ..Default::default()
         },
-        "video".to_owned(),
-        "webrtc-rs".to_owned(),
+        "video1".to_owned(),
+        "webrtc-rs-1".to_owned(),
+    ));
+    let video_track2 = Arc::new(TrackLocalStaticRTP::new(
+        RTCRtpCodecCapability {
+            mime_type: MIME_TYPE_VP8.to_owned(),
+            ..Default::default()
+        },
+        "video2".to_owned(),
+        "webrtc-rs-2".to_owned(),
     ));
 
     // Add this newly created track to the PeerConnection
     let rtp_sender = peer_connection
         .add_track(Arc::clone(&video_track) as Arc<dyn TrackLocal + Send + Sync>)
+        .await?;
+    let rtp_sender2 = peer_connection
+        .add_track(Arc::clone(&video_track2) as Arc<dyn TrackLocal + Send + Sync>)
         .await?;
 
     // Read incoming RTCP packets
@@ -324,6 +348,11 @@ async fn nats_to_webrtc() -> Result<()> {    // Create a MediaEngine object to c
     tokio::spawn(async move {
         let mut rtcp_buf = vec![0u8; 1500];
         while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+        Result::<()>::Ok(())
+    });
+    tokio::spawn(async move {
+        let mut rtcp_buf = vec![0u8; 1500];
+        while let Ok((_, _)) = rtp_sender2.read(&mut rtcp_buf).await {}
         Result::<()>::Ok(())
     });
 
@@ -367,10 +396,6 @@ async fn nats_to_webrtc() -> Result<()> {    // Create a MediaEngine object to c
         }))
         .await;
 
-    // Wait for the offer to be pasted
-    let desc_data = get_sdp()?;
-    let offer = serde_json::from_str::<RTCSessionDescription>(&desc_data)?;
-
     // Set the remote SessionDescription
     peer_connection.set_remote_description(offer).await?;
 
@@ -390,37 +415,147 @@ async fn nats_to_webrtc() -> Result<()> {    // Create a MediaEngine object to c
 
     // Output the answer in base64 so we can paste it in browser
     if let Some(local_desc) = peer_connection.local_description().await {
-        let json_str = serde_json::to_string(&local_desc)?;
-        let b64 = base64::encode(&json_str);
-        println!("{}", b64);
+        info!("PC send local SDP");
+        answer_tx.send(local_desc.sdp);
     } else {
-        println!("generate local_description failed!");
+        warn!("generate local_description failed!");
     }
 
     // get RTP from NATS
-    let sub = nc.subscribe("my.subject").await?;
+    let sub = nc.subscribe(&subject).await?;
 
     // Read RTP packets forever and send them to the WebRTC Client
     tokio::spawn(async move {
         use webrtc::error::Error;
         while let Some(msg) = sub.next().await {
             let raw_rtp = msg.data;
-            // println!("nats forward");
-            if let Err(err) = video_track.write(&raw_rtp).await {
+
+            // TODO: real dyanmic dispatch for RTP
+            info!("sub: {}", &msg.subject.as_str());
+            let track = match msg.subject.as_str() {
+                "rtc.1234.user1" => video_track.clone(),
+                "rtc.1234.user2" => video_track2.clone(),
+                _ => unreachable!(),
+            };
+            if let Err(err) = track.write(&raw_rtp).await {
                 println!("nats forward err: {:?}", err);
                 if Error::ErrClosedPipe.equal(&err) {
                     // The peerConnection has been closed.
                     return;
                 } else {
-                    println!("video_track write err: {}", err);
+                    println!("track write err: {}", err);
                     std::process::exit(0);
                 }
             }
         }
     });
 
-    println!("Press ctlr-c to stop");
-    tokio::signal::ctrl_c().await.unwrap();
+    // TODO: a signal to close connection?
+    info!("PC wait");
+    tokio::time::sleep(Duration::from_secs(3000)).await;
+    peer_connection.close().await?;
 
     Ok(())
+}
+
+
+/// Web server for communicating with web clients
+#[actix_web::main]
+async fn web_main() -> std::io::Result<()> {
+    HttpServer::new(||
+            App::new()
+                // .wrap(Cors::default())
+                // enable logger
+                .wrap(actix_web::middleware::Logger::default())
+                .service(Files::new("/static", "site").prefer_utf8(true))   // demo site
+                .service(create)
+                .service(publish)
+                .service(subscribe_all)
+                .service(subscribe)
+                .service(list)
+        )
+        .bind("127.0.0.1:8080")?
+        .run()
+        .await
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CreateParams {
+    room: String,
+    id: String,
+    pub_token: Option<String>,
+    sub_token: Option<String>,
+}
+
+#[post("/create")]
+async fn create(params: web::Json<CreateParams>) -> impl Responder {
+    // TODO: save to cache
+    unimplemented!();
+    ""
+}
+
+/// WebRTC WHIP compatible endpoint for publisher
+#[post("/pub/{room}/{id}")]
+async fn publish(auth: BearerAuth,
+                 path: web::Path<(String, String)>,
+                 sdp: web::Bytes) -> impl Responder {
+                 // web::Json(sdp): web::Json<RTCSessionDescription>) -> impl Responder {
+    let (room, id) = path.into_inner();
+    // TODO: verify "Content-Type: application/sdp"
+    let sdp = String::from_utf8(sdp.to_vec()).unwrap(); // FIXME: no unwrap
+    info!("pub: auth {} sdp {:?}", auth.token(), sdp);
+    // TODO: token verification
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(webrtc_to_nats(sdp, tx, format!("rtc.{}.{}", room, id)));
+    // TODO: timeout
+    let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
+    info!("SDP answer: {}", sdp_answer);
+    HttpResponse::Created() // 201
+        .content_type("application/sdp")
+        .append_header(("Location", ""))    // TODO: what's the need?
+        .body(sdp_answer)
+}
+
+#[post("/sub/{room}/{id}")]
+async fn subscribe(auth: BearerAuth,
+                   path: web::Path<(String, String)>) -> impl Responder {
+    let (room, id) = path.into_inner();
+    // TODO: token verification
+    // auth.token().to_string()
+    // take SDP offer from JSON
+    // call nats_to_webrtc (with timeout control?)
+    // return SDP answer
+    unimplemented!();
+    ""
+}
+
+#[post("/sub/{room}/all")]
+async fn subscribe_all(auth: BearerAuth,
+                       path: web::Path<String>,
+                       sdp: web::Bytes) -> impl Responder {
+    let room = path.into_inner();
+    // TODO: verify "Content-Type: application/sdp"
+    // TODO: token verification
+    // auth.token().to_string()
+    let sdp = String::from_utf8(sdp.to_vec()).unwrap(); // FIXME: no unwrap
+    info!("sub_all: auth {} sdp {:?}", auth.token(), sdp);
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(nats_to_webrtc(sdp, tx, format!("rtc.{}.*", room)));
+    // TODO: timeout
+    let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
+    info!("SDP answer: {}", sdp_answer);
+    HttpResponse::Created() // 201
+        .content_type("application/sdp")
+        .body(sdp_answer)
+}
+
+#[post("/info/{room}/list")]
+async fn list(auth: BearerAuth,
+              path: web::Path<String>) -> impl Responder {
+    let room = path.into_inner();
+    // TODO: token verification
+    // auth.token().to_string()
+    // return participants
+    unimplemented!();
+    ""
 }
