@@ -194,6 +194,7 @@ async fn webrtc_to_nats(user: String, offer: String, answer_tx: Sender<String>, 
                     // TODO: can we use SSRC?
                     let subject = subject.clone(); // FIXME: avoid this
                     tokio::spawn(async move {
+                        // FIXME: the id here generated from browser might be "{...}"
                         let subject = format!("{}.{}", subject, track.id().await);
                         info!("publish to {}", subject);
                         let mut b = vec![0u8; 1500];
@@ -507,10 +508,10 @@ async fn web_main() -> std::io::Result<()> {
                 // enable logger
                 .wrap(actix_web::middleware::Logger::default())
                 .service(Files::new("/static", "site").prefer_utf8(true))   // demo site
-                .service(create)
+                .service(create_room)
+                .service(create_pub)
                 .service(publish)
                 .service(subscribe_all)
-                .service(subscribe)
                 .service(list)
         )
         .bind("127.0.0.1:8080")?
@@ -519,20 +520,34 @@ async fn web_main() -> std::io::Result<()> {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct CreateParams {
+struct CreateRoomParams {
+    room: String,
+    token: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CreatePubParams {
     room: String,
     id: String,
-    pub_token: Option<String>,
-    sub_token: Option<String>,
+    token: Option<String>,
 }
 
 
-#[post("/create")]
-async fn create(params: web::Json<CreateParams>) -> impl Responder {
+#[post("/create/room")]
+async fn create_room(params: web::Json<CreateRoomParams>) -> impl Responder {
     // TODO: save to cache
-    unimplemented!();
-    ""
+    info!("{:?}", params);
+    "TODO: room set"
 }
+
+
+#[post("/create/pub")]
+async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
+    // TODO: save to cache
+    info!("{:?}", params);
+    "TODO: pub set"
+}
+
 
 /// WebRTC WHIP compatible endpoint for publisher
 #[post("/pub/{room}/{id}")]
@@ -554,19 +569,6 @@ async fn publish(auth: BearerAuth,
         .content_type("application/sdp")
         .append_header(("Location", ""))    // TODO: what's the need?
         .body(sdp_answer)
-}
-
-#[post("/sub/{room}/{id}")]
-async fn subscribe(auth: BearerAuth,
-                   path: web::Path<(String, String)>) -> impl Responder {
-    let (room, id) = path.into_inner();
-    // TODO: token verification
-    // auth.token().to_string()
-    // take SDP offer from JSON
-    // call nats_to_webrtc (with timeout control?)
-    // return SDP answer
-    unimplemented!();
-    ""
 }
 
 #[post("/sub/{room}/all")]

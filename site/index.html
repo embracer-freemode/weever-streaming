@@ -1,87 +1,244 @@
-local offer: <br/><textarea id="localSessionDescription" readonly="true"></textarea>
-<br/>
-
-remote answer: <br/><textarea id="remoteSessionDescription" readonly="true"></textarea>
-<br/>
-
-<button onclick="window.startSession()"> Start Session </button><br />
-<br/>
-
-Video <br/>
-<div id="remoteVideos"></div> <br />
-
-Logs <br/>
-<div id="div"></div>
-
-
+<h2>Create room (whole room security token setting for pulling streams)</h2>
+(this will only be called from other in-cluster service for settings)<br/>
+room: <input id="create_room_room" type="text"></input><br/>
+token: <input id="create_room_token" type="text"></input><br/>
+<button onclick="window.createRoom()">Create Room</button><br/><br/>
+Logs:<br/>
+<div id="create_room_log"></div>
 <script>
-var x = "";
-let pc = new RTCPeerConnection({
-  iceServers: [
-    {
-      urls: 'stun:stun.l.google.com:19302'
-    }
-  ]
-})
-let log = msg => {
-  document.getElementById('div').innerHTML += msg + '<br>'
-}
-
-var foo = [];
-pc.ontrack = function (event) {
-  let id = event.streams[0].id
-  var div;
-  div = document.getElementById(`media-${id}`)
-  if (div == null) {
-    div = document.createElement("div")
-    div.id = `media-${id}`
-    div.textContent = id
+window.createRoom = () => {
+  let log = msg => {
+    document.getElementById("create_room_log").innerHTML += msg + "<br>"
   }
 
+  let room = document.getElementById("create_room_room").value;
+  let token = document.getElementById("create_room_token").value;
+  let params = {
+      "room": room,
+      "token": token,
+  };
 
-  foo.push(event);
-
-  // video or audio here
-  let media = document.createElement(event.track.kind)
-
-  // TODO: multiple media streams?
-  media.srcObject = event.streams[0]
-  media.autoplay = true
-  media.controls = true
-
-  div.appendChild(media)
-  document.getElementById('remoteVideos').appendChild(div)
-}
-
-pc.oniceconnectionstatechange = e => log(pc.iceConnectionState)
-pc.onicecandidate = event => {
-  if (event.candidate === null) {
-    document.getElementById('localSessionDescription').value = pc.localDescription.sdp
-  }
-}
-
-// Offer to receive 2 video tracks
-pc.addTransceiver('video', {'direction': 'recvonly'})
-pc.addTransceiver('video', {'direction': 'recvonly'})
-pc.createOffer().then(d => pc.setLocalDescription(d)).catch(log)
-
-window.startSession = () => {
-  let offer = document.getElementById('localSessionDescription').value;
-
-  fetch("/sub/1234/all", {
+  fetch("/create/room", {
     method: "POST",
-    body: offer,
     headers: {
-      "Content-Type": "application/sdp",
-      "Authorization": "Bearer <token>",
+      "Accept": "application/json",
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify(params),
   }).then(res => {
-    log("Request complete! response:", res);
+    log("Request complete! ", res);
     res.text().then(function(answer) {
-      document.getElementById("remoteSessionDescription").value = answer;
-      pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}))
+      log(answer);
     })
   });
+}
+</script>
+<hr>
+
+<h2>Create publisher (per publisher security token setting for pushing streams)</h2>
+(this will only be called from other in-cluster service for settings)<br/>
+room: <input id="create_pub_room" type="text"></input><br/>
+id: <input id="create_pub_id" type="text"></input><br/>
+token: <input id="create_pub_token" type="text"></input><br/>
+<button onclick="window.createPublisher()">Create Publisher</button><br/><br/>
+Logs:<br/>
+<div id="create_pub_log"></div>
+<script>
+window.createPublisher = () => {
+  let log = msg => {
+    document.getElementById("create_pub_log").innerHTML += msg + "<br>"
+  }
+
+  let room = document.getElementById("create_pub_room").value;
+  let id = document.getElementById("create_pub_id").value;
+  let token = document.getElementById("create_pub_token").value;
+  let params = {
+      "room": room,
+      "id": id,
+      "token": token,
+  };
+
+  fetch("/create/pub", {
+    method: "POST",
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(params),
+  }).then(res => {
+    log("Request complete! ", res);
+    res.text().then(function(answer) {
+      log(answer);
+    })
+  });
+}
+</script>
+<hr>
+
+<h2>Run Publisher</h2>
+room: <input id="run_pub_room" type="text"></input><br/>
+id: <input id="run_pub_id" type="text"></input><br/>
+token: <input id="run_pub_token" type="text"></input><br/>
+<button onclick="window.runPublisher()">Run Publisher</button><br/><br/>
+<video id="pub_video" width="160" height="120" autoplay muted></video><br />
+local offer: <br/><textarea id="pubLocalSessionDescription" readonly="true"></textarea>
+<br/>
+remote answer: <br/><textarea id="pubRemoteSessionDescription" readonly="true"></textarea>
+<br/>
+Logs:<br/>
+<div id="run_pub_log"></div>
+<script>
+window.runPublisher = () => {
+  let log = msg => {
+    document.getElementById("run_pub_log").innerHTML += msg + "<br>"
+  }
+
+  let pub_pc = new RTCPeerConnection({
+    iceServers: [
+      {
+        urls: "stun:stun.l.google.com:19302"
+      }
+    ]
+  })
+
+  pub_pc.oniceconnectionstatechange = e => log(pub_pc.iceConnectionState);
+  pub_pc.onicecandidate = event => {
+    if (event.candidate === null) {
+      document.getElementById("pubLocalSessionDescription").value = pub_pc.localDescription.sdp
+    }
+  }
+
+  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    .then(stream => {
+      stream.getTracks().forEach(track => pub_pc.addTrack(track, stream))
+      document.getElementById('pub_video').srcObject = stream
+
+      let room = document.getElementById("run_pub_room").value;
+      let id = document.getElementById("run_pub_id").value;
+      let token = document.getElementById("run_pub_token").value;
+
+      pub_pc.createOffer()
+        .then(offer => {
+          pub_pc.setLocalDescription(offer);
+          fetch(`/pub/${room}/${id}`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`,
+            },
+            body: offer.sdp,
+          }).then(res => {
+            log("Request complete! ", res);
+            res.text().then(function(answer) {
+              document.getElementById("pubRemoteSessionDescription").value = answer;
+              pub_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
+            })
+          });
+        })
+        .catch(log);
+    }).catch(log);
+}
+</script>
+<hr>
+
+<h2>Run Sublisher</h2>
+room: <input id="run_sub_room" type="text"></input><br/>
+token: <input id="run_sub_token" type="text"></input><br/>
+local offer: <br/><textarea id="subLocalSessionDescription" readonly="true"></textarea><br/>
+remote answer: <br/><textarea id="subRemoteSessionDescription" readonly="true"></textarea><br/>
+<button onclick="window.runSubscriber()"> Start Session </button><br />
+<br/>
+Video<br/>
+<div id="sub_videos"></div><br/>
+Logs<br/>
+<div id="sub_log"></div>
+<script>
+var foo = [];
+window.runSubscriber = () => {
+  let log = msg => {
+    document.getElementById("sub_log").innerHTML += msg + "<br>"
+  };
+
+  let sub_pc = new RTCPeerConnection({
+    iceServers: [
+      {
+        urls: "stun:stun.l.google.com:19302"
+      }
+    ]
+  });
+
+  sub_pc.oniceconnectionstatechange = e => log(sub_pc.iceConnectionState);
+  sub_pc.onicecandidate = event => {
+    if (event.candidate === null) {
+      document.getElementById("subLocalSessionDescription").value = sub_pc.localDescription.sdp
+    }
+  }
+
+  sub_pc.ontrack = function (event) {
+    if (event.streams == null) {
+      return;
+    }
+
+    let id = event.streams[0].id
+
+    // quick hack for hidden hardcode video stream that does not present
+    if (id.startsWith("{")) {
+      return;
+    }
+
+    foo.push(event);
+    var div;
+    div = document.getElementById(`media-${id}`)
+    if (div == null) {
+      div = document.createElement("div")
+      div.id = `media-${id}`
+      div.textContent = id
+    }
+
+    // video or audio here
+    let media = document.createElement(event.track.kind)
+
+    // TODO: multiple media streams?
+    media.srcObject = event.streams[0]
+    media.autoplay = true
+    media.controls = true
+
+    div.appendChild(media)
+    document.getElementById("sub_videos").appendChild(div)
+  }
+
+  // Offer to receive 3 video tracks, 3 audio tracks
+  // TODO: dynamically create this
+  sub_pc.addTransceiver("video", {"direction": "recvonly"})
+  sub_pc.addTransceiver("video", {"direction": "recvonly"})
+  sub_pc.addTransceiver("video", {"direction": "recvonly"})
+  sub_pc.addTransceiver("audio", {"direction": "recvonly"})
+  sub_pc.addTransceiver("audio", {"direction": "recvonly"})
+  sub_pc.addTransceiver("audio", {"direction": "recvonly"})
+
+  sub_pc.createOffer()
+    .then(offer => {
+      sub_pc.setLocalDescription(offer);
+      document.getElementById("subLocalSessionDescription").value = offer.sdp;
+
+      let room = document.getElementById("run_sub_room").value;
+      let token = document.getElementById("run_sub_token").value;
+
+      fetch(`/sub/${room}/all`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/sdp",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: offer.sdp,
+      }).then(res => {
+        log("Request complete! response:", res);
+        res.text().then(function(answer) {
+          document.getElementById("subRemoteSessionDescription").value = answer;
+          sub_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
+        })
+      });
+    })
+    .catch(log);
 }
 </script>
 
