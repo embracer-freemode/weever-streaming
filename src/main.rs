@@ -1,7 +1,7 @@
 //! WebRTC SFU with horizontal scale design
 
 use anyhow::Result;
-use log::{info, warn};
+use log::{info, warn, error};
 use interceptor::registry::Registry;
 use rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
 use webrtc::api::interceptor_registry::register_default_interceptors;
@@ -27,6 +27,8 @@ use actix_web_httpauth::extractors::bearer::BearerAuth;
 // use actix_cors::Cors;
 use actix_files::Files;
 use serde::{Deserialize, Serialize};
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
 
 fn main() -> Result<()> {
@@ -36,16 +38,16 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+
+// FIXME: remove this
+// (user, track id) -> mime type
+static HACK_MEDIA: Lazy<Mutex<HashMap<(String, String), String>>> = Lazy::new(|| Mutex::new(HashMap::default()));
+
+
 /// Extract RTP streams from WebRTC, and send it to NATS
 ///
 /// based on [rtp-forwarder](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-forwarder) example
-async fn webrtc_to_nats(offer: String, answer_tx: Sender<String>, subject: String) -> Result<()> {
-    // build SDP Offer type
-    let mut sdp = RTCSessionDescription::default();
-    sdp.sdp_type = RTCSdpType::Offer;
-    sdp.sdp = offer;
-    let offer = sdp;
-
+async fn webrtc_to_nats(user: String, offer: String, answer_tx: Sender<String>, subject: String) -> Result<()> {
     // NATS
     // TODO: share NATS connection
     info!("connecting NATS");
@@ -115,13 +117,48 @@ async fn webrtc_to_nats(offer: String, answer_tx: Sender<String>, subject: Strin
     // Create a new RTCPeerConnection
     let peer_connection = Arc::new(api.new_peer_connection(config).await?);
 
-    // Allow us to receive 1 audio track, and 1 video track
-    peer_connection
-        .add_transceiver_from_kind(RTPCodecType::Audio, &[])
-        .await?;
-    peer_connection
-        .add_transceiver_from_kind(RTPCodecType::Video, &[])
-        .await?;
+    // TODO: more efficent way?
+    // TODO: limitation for safety?
+    //
+    // Allow us to receive N video/audio tracks based on SDP Offer
+    // sample of SDP line: "m=video 9 UDP/TLS/RTP/SAVPF 96"
+    for sdp_media in offer.rsplit_terminator("m=") {
+        let msid = sdp_media.rsplit_once("msid:");
+        if msid.is_none() {
+            continue;
+        }
+        let (_, msid) = msid.unwrap();
+        let id = msid.split_whitespace().take(2).skip(1).next();
+        if id.is_none() {
+            continue;
+        }
+        let id = id.unwrap();
+
+        // TODO: global cache for media count
+        if sdp_media.starts_with("video") {
+            // FIXME: use better way
+            // TODO: add id in
+            HACK_MEDIA.lock().unwrap()
+                .insert((user.clone(), id.to_string()), "video".to_string());
+            peer_connection
+                .add_transceiver_from_kind(RTPCodecType::Video, &[])
+                .await?;
+        } else if sdp_media.starts_with("audio") {
+            // FIXME: use better way
+            // TODO: add id in
+            HACK_MEDIA.lock().unwrap()
+                .insert((user.clone(), id.to_string()), "audio".to_string());
+            peer_connection
+                .add_transceiver_from_kind(RTPCodecType::Audio, &[])
+                .await?;
+        }
+    }
+
+    // build SDP Offer type
+    let mut sdp = RTCSessionDescription::default();
+    sdp.sdp_type = RTCSdpType::Offer;
+    sdp.sdp = offer;
+    let offer = sdp;
 
     // Set a handler for when a new remote track starts, this handler will forward data to
     // our UDP listeners.
@@ -153,8 +190,12 @@ async fn webrtc_to_nats(offer: String, answer_tx: Sender<String>, subject: Strin
 
                     let nc = nc.clone();
                     // push RTP to NATS
-                    let subject = subject.clone();  // TODO: avoid this?
+                    // use ID to disquish streams from same publisher
+                    // TODO: can we use SSRC?
+                    let subject = subject.clone(); // FIXME: avoid this
                     tokio::spawn(async move {
+                        let subject = format!("{}.{}", subject, track.id().await);
+                        info!("publish to {}", subject);
                         let mut b = vec![0u8; 1500];
                         while let Ok((n, _)) = track.read(&mut b).await {
                             nc.publish(&subject, &b[..n]).await?;
@@ -172,10 +213,9 @@ async fn webrtc_to_nats(offer: String, answer_tx: Sender<String>, subject: Strin
     // This will notify you when the peer has connected/disconnected
     peer_connection
         .on_ice_connection_state_change(Box::new(move |connection_state: RTCIceConnectionState| {
-            println!("Connection State has changed {}", connection_state);
-            if connection_state == RTCIceConnectionState::Connected {
-                println!("Ctrl+C the remote client to stop the demo");
-            }
+            info!("Connection State has changed {}", connection_state);
+            // if connection_state == RTCIceConnectionState::Connected {
+            // }
             Box::pin(async {})
         }))
         .await;
@@ -184,22 +224,20 @@ async fn webrtc_to_nats(offer: String, answer_tx: Sender<String>, subject: Strin
     // This will notify you when the peer has connected/disconnected
     peer_connection
         .on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
-            print!("Peer Connection State has changed: {}\n", s);
+            info!("Peer Connection State has changed: {}", s);
 
             if s == RTCPeerConnectionState::Failed {
                 // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
                 // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
                 // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-                println!("Peer Connection has gone to failed exiting: Done forwarding");
-                std::process::exit(0);
+                info!("Peer Connection has gone to failed exiting: Done forwarding");
+                // TODO: cleanup?
+                // std::process::exit(0);
             }
 
-            if s == RTCPeerConnectionState::Connected {
-                println!("webrtc to nats connected!");
-                // FIXME: refactor
-                // spawn the other part for test
-                // tokio::spawn(nats_to_webrtc());
-            }
+            // if s == RTCPeerConnectionState::Connected {
+            //     info!("webrtc to nats connected!");
+            // }
 
             Box::pin(async {})
         }))
@@ -317,57 +355,57 @@ async fn nats_to_webrtc(offer: String, answer_tx: Sender<String>, subject: Strin
 
     // Create Track that we send video back to browser on
     // TODO: dynamic creation
-    let video_track = Arc::new(TrackLocalStaticRTP::new(
-        RTCRtpCodecCapability {
-            mime_type: MIME_TYPE_VP8.to_owned(),
-            ..Default::default()
-        },
-        "video1".to_owned(),
-        "webrtc-rs-1".to_owned(),
-    ));
-    let video_track2 = Arc::new(TrackLocalStaticRTP::new(
-        RTCRtpCodecCapability {
-            mime_type: MIME_TYPE_VP8.to_owned(),
-            ..Default::default()
-        },
-        "video2".to_owned(),
-        "webrtc-rs-2".to_owned(),
-    ));
+    // TODO: how to handle video/audio from same publisher and send to different track?
+    // HACK_MEDIA.lock().unwrap().push("video".to_string());
 
-    // Add this newly created track to the PeerConnection
-    let rtp_sender = peer_connection
-        .add_track(Arc::clone(&video_track) as Arc<dyn TrackLocal + Send + Sync>)
-        .await?;
-    let rtp_sender2 = peer_connection
-        .add_track(Arc::clone(&video_track2) as Arc<dyn TrackLocal + Send + Sync>)
-        .await?;
+    let mut tracks = HashMap::new();
+    let media = HACK_MEDIA.lock().unwrap().clone(); // TODO: avoid this?
+    for ((user, track_id), mime) in media {
+        let mime = match mime.as_ref() {
+            "video" => MIME_TYPE_VP8,
+            "audio" => MIME_TYPE_OPUS,
+            _ => unreachable!(),
+        };
 
-    // Read incoming RTCP packets
-    // Before these packets are returned they are processed by interceptors. For things
-    // like NACK this needs to be called.
-    tokio::spawn(async move {
-        let mut rtcp_buf = vec![0u8; 1500];
-        while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-        Result::<()>::Ok(())
-    });
-    tokio::spawn(async move {
-        let mut rtcp_buf = vec![0u8; 1500];
-        while let Ok((_, _)) = rtp_sender2.read(&mut rtcp_buf).await {}
-        Result::<()>::Ok(())
-    });
+        let track = Arc::new(TrackLocalStaticRTP::new(
+            RTCRtpCodecCapability {
+                mime_type: mime.to_owned(),
+                ..Default::default()
+            },
+            track_id.to_string(),       // TODO: verify it, id to media id
+            user.to_string(),           // TODO: verify it, msid to user
+        ));
+
+        // for later dyanmic RTP dispatch from NATS
+        tracks.insert((user, track_id), track.clone());
+
+        let rtp_sender = peer_connection
+            .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
+            .await?;
+
+        // Read incoming RTCP packets
+        // Before these packets are returned they are processed by interceptors. For things
+        // like NACK this needs to be called.
+        tokio::spawn(async move {
+            let mut rtcp_buf = vec![0u8; 1500];
+            while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+            Result::<()>::Ok(())
+        });
+    }
 
     // Set the handler for ICE connection state
     // This will notify you when the peer has connected/disconnected
     let pc = Arc::clone(&peer_connection);
     peer_connection
         .on_ice_connection_state_change(Box::new(move |connection_state: RTCIceConnectionState| {
-            println!("Connection State has changed {}", connection_state);
+            info!("Connection State has changed {}", connection_state);
             let pc2 = Arc::clone(&pc);
             Box::pin(async move {
                 if connection_state == RTCIceConnectionState::Failed {
                     if let Err(err) = pc2.close().await {
-                        println!("peer connection close err: {}", err);
-                        std::process::exit(0);
+                        info!("peer connection close err: {}", err);
+                        // TODO: cleanup?
+                        // std::process::exit(0);
                     }
                 }
             })
@@ -378,19 +416,20 @@ async fn nats_to_webrtc(offer: String, answer_tx: Sender<String>, subject: Strin
     // This will notify you when the peer has connected/disconnected
     peer_connection
         .on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
-            print!("Peer Connection State has changed: {}\n", s);
+            info!("Peer Connection State has changed: {}", s);
 
             if s == RTCPeerConnectionState::Failed {
                 // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
                 // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
                 // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-                println!("Peer Connection has gone to failed exiting: Done forwarding");
-                std::process::exit(0);
+                info!("Peer Connection has gone to failed exiting: Done forwarding");
+                // TODO: cleanup?
+                // std::process::exit(0);
             }
 
-            if s == RTCPeerConnectionState::Connected {
-                println!("nats to webrtc connected!")
-            }
+            // if s == RTCPeerConnectionState::Connected {
+            //     info!("nats to webrtc connected!")
+            // }
 
             Box::pin(async {})
         }))
@@ -431,20 +470,20 @@ async fn nats_to_webrtc(offer: String, answer_tx: Sender<String>, subject: Strin
             let raw_rtp = msg.data;
 
             // TODO: real dyanmic dispatch for RTP
-            info!("sub: {}", &msg.subject.as_str());
-            let track = match msg.subject.as_str() {
-                "rtc.1234.user1" => video_track.clone(),
-                "rtc.1234.user2" => video_track2.clone(),
-                _ => unreachable!(),
-            };
+            // subject sample: "rtc.1234.user1.video1"
+            let mut it = msg.subject.rsplitn(3, ".").take(2);
+            let track_id = it.next().unwrap().to_string();
+            let user = it.next().unwrap().to_string();
+            let track = tracks.get(&(user, track_id)).unwrap();
             if let Err(err) = track.write(&raw_rtp).await {
-                println!("nats forward err: {:?}", err);
+                error!("nats forward err: {:?}", err);
                 if Error::ErrClosedPipe.equal(&err) {
                     // The peerConnection has been closed.
                     return;
                 } else {
-                    println!("track write err: {}", err);
-                    std::process::exit(0);
+                    error!("track write err: {}", err);
+                    // TODO: cleanup?
+                    // std::process::exit(0);
                 }
             }
         }
@@ -487,6 +526,7 @@ struct CreateParams {
     sub_token: Option<String>,
 }
 
+
 #[post("/create")]
 async fn create(params: web::Json<CreateParams>) -> impl Responder {
     // TODO: save to cache
@@ -506,7 +546,7 @@ async fn publish(auth: BearerAuth,
     info!("pub: auth {} sdp {:?}", auth.token(), sdp);
     // TODO: token verification
     let (tx, rx) = tokio::sync::oneshot::channel();
-    tokio::spawn(webrtc_to_nats(sdp, tx, format!("rtc.{}.{}", room, id)));
+    tokio::spawn(webrtc_to_nats(id.clone(), sdp, tx, format!("rtc.{}.{}", room, id)));
     // TODO: timeout
     let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
     info!("SDP answer: {}", sdp_answer);
@@ -540,7 +580,7 @@ async fn subscribe_all(auth: BearerAuth,
     let sdp = String::from_utf8(sdp.to_vec()).unwrap(); // FIXME: no unwrap
     info!("sub_all: auth {} sdp {:?}", auth.token(), sdp);
     let (tx, rx) = tokio::sync::oneshot::channel();
-    tokio::spawn(nats_to_webrtc(sdp, tx, format!("rtc.{}.*", room)));
+    tokio::spawn(nats_to_webrtc(sdp, tx, format!("rtc.{}.*.*", room)));
     // TODO: timeout
     let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
     info!("SDP answer: {}", sdp_answer);
