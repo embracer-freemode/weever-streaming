@@ -18,6 +18,8 @@ use webrtc::peer::ice::ice_server::RTCIceServer;
 use webrtc::peer::peer_connection_state::RTCPeerConnectionState;
 use webrtc::peer::sdp::session_description::RTCSessionDescription;
 use webrtc::peer::sdp::sdp_type::RTCSdpType;
+use webrtc::data::data_channel::data_channel_message::DataChannelMessage;
+use webrtc::data::data_channel::RTCDataChannel;
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::time::Duration;
@@ -409,6 +411,54 @@ async fn nats_to_webrtc(offer: String, answer_tx: Sender<String>, subject: Strin
                         // std::process::exit(0);
                     }
                 }
+            })
+        }))
+        .await;
+
+    // Register data channel creation handling
+    peer_connection
+        .on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
+            let dc_label = dc.label().to_owned();
+
+            // only accept data channel with label "control"
+            if dc_label != "control" {
+               return Box::pin(async {});
+            }
+
+            let dc_id = dc.id();
+            info!("New DataChannel {} {}", dc_label, dc_id);
+
+            // Register channel opening handling
+            Box::pin(async move {
+                let dc2 = Arc::clone(&dc);
+                let dc_label2 = dc_label.clone();
+                let dc_id2 = dc_id.clone();
+                dc.on_open(Box::new(move || {
+                    info!("Data channel '{}'-'{}' open", dc_label2, dc_id2);
+
+                    Box::pin(async move {
+                        let mut result = Result::<usize>::Ok(0);
+                        while result.is_ok() {
+                            let timeout = tokio::time::sleep(Duration::from_secs(5));
+                            tokio::pin!(timeout);
+
+                            tokio::select! {
+                                _ = timeout.as_mut() =>{
+                                    let message = "hello".to_string();
+                                    info!("Sending '{}'", message);
+                                    result = dc2.send_text(message).await;
+                                }
+                            };
+                        }
+                    })
+                })).await;
+
+                // Register text message handling
+                dc.on_message(Box::new(move |msg: DataChannelMessage| {
+                    let msg_str = String::from_utf8(msg.data.to_vec()).unwrap();
+                    info!("Message from DataChannel '{}': '{}'", dc_label, msg_str);
+                    Box::pin(async {})
+                })).await;
             })
         }))
         .await;

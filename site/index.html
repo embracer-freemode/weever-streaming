@@ -111,7 +111,7 @@ window.runPublisher = () => {
   navigator.mediaDevices.getUserMedia({ video: true, audio: true })
     .then(stream => {
       stream.getTracks().forEach(track => pub_pc.addTrack(track, stream))
-      document.getElementById('pub_video').srcObject = stream
+      document.getElementById("pub_video").srcObject = stream
 
       let room = document.getElementById("run_pub_room").value;
       let id = document.getElementById("run_pub_id").value;
@@ -148,11 +148,12 @@ remote answer: <br/><textarea id="subRemoteSessionDescription" readonly="true"><
 <button onclick="window.runSubscriber()"> Start Session </button><br />
 <br/>
 Video<br/>
-<div id="sub_videos"></div><br/>
+<div id="sub_videos"></div><br/><br />
+message: <input id="sub_dc" type="text"></input><br/>
+<button onclick="window.subSendMessage()">Send Message</button><br /><br />
 Logs<br/>
 <div id="sub_log"></div>
 <script>
-var foo = [];
 window.runSubscriber = () => {
   let log = msg => {
     document.getElementById("sub_log").innerHTML += msg + "<br>"
@@ -173,6 +174,20 @@ window.runSubscriber = () => {
     }
   }
 
+  let sendChannel = sub_pc.createDataChannel("control")
+  sendChannel.onclose = () => console.log("sendChannel has closed")
+  sendChannel.onopen = () => console.log("sendChannel has opened")
+  sendChannel.onmessage = e => log(`Message from DataChannel "${sendChannel.label}" payload "${e.data}"`)
+
+  window.subSendMessage = () => {
+    let message = document.getElementById("sub_dc").value
+    if (message === "") {
+      return alert("Message must not be empty")
+    }
+
+    sendChannel.send(message)
+  }
+
   sub_pc.ontrack = function (event) {
     if (event.streams == null) {
       return;
@@ -185,7 +200,6 @@ window.runSubscriber = () => {
       return;
     }
 
-    foo.push(event);
     var div;
     div = document.getElementById(`media-${id}`)
     if (div == null) {
