@@ -41,15 +41,38 @@ fn main() -> Result<()> {
 }
 
 
-// FIXME: remove this
-// (user, track id) -> mime type
-static HACK_MEDIA: Lazy<Mutex<HashMap<(String, String), String>>> = Lazy::new(|| Mutex::new(HashMap::default()));
+#[derive(Debug, Default)]
+struct State {
+    rooms: HashMap<String, Room>,
+}
+
+#[derive(Debug, Default)]
+struct Room {
+    name: String,
+    /// (user, track id) -> mime type
+    user_track_to_mime: HashMap<(String, String), String>,
+    peers: HashMap<String, PeerConnetionInfo>,
+    /// user -> token
+    pub_tokens: HashMap<String, String>,
+    sub_token: String,
+}
+
+#[derive(Debug, Default)]
+struct PeerConnetionInfo {
+    name: String,
+    // pc: Option<RTCPeerConnection>,
+    notify_renegotiation: Arc<Notify>,
+    // notify_close: ...,
+}
+
+static HACK_STATE: Lazy<Mutex<State>> = Lazy::new(|| Default::default());
+
 
 
 /// Extract RTP streams from WebRTC, and send it to NATS
 ///
 /// based on [rtp-forwarder](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-forwarder) example
-async fn webrtc_to_nats(user: String, offer: String, answer_tx: Sender<String>, subject: String) -> Result<()> {
+async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: Sender<String>, subject: String) -> Result<()> {
     // NATS
     // TODO: share NATS connection
     info!("connecting NATS");
@@ -140,16 +163,24 @@ async fn webrtc_to_nats(user: String, offer: String, answer_tx: Sender<String>, 
         if sdp_media.starts_with("video") {
             // FIXME: use better way
             // TODO: add id in
-            HACK_MEDIA.lock().unwrap()
-                .insert((user.clone(), id.to_string()), "video".to_string());
+            {
+                let room_info = HACK_STATE.lock();
+                let mut room_info = room_info.unwrap();
+                let room_info = room_info.rooms.entry(room.clone()).or_default();
+                room_info.user_track_to_mime.insert((user.clone(), id.to_string()), "video".to_string());
+            }
             peer_connection
                 .add_transceiver_from_kind(RTPCodecType::Video, &[])
                 .await?;
         } else if sdp_media.starts_with("audio") {
             // FIXME: use better way
             // TODO: add id in
-            HACK_MEDIA.lock().unwrap()
-                .insert((user.clone(), id.to_string()), "audio".to_string());
+            {
+                let room_info = HACK_STATE.lock();
+                let mut room_info = room_info.unwrap();
+                let room_info = room_info.rooms.entry(room.clone()).or_default();
+                room_info.user_track_to_mime.insert((user.clone(), id.to_string()), "audio".to_string());
+            }
             peer_connection
                 .add_transceiver_from_kind(RTPCodecType::Audio, &[])
                 .await?;
@@ -284,7 +315,7 @@ async fn webrtc_to_nats(user: String, offer: String, answer_tx: Sender<String>, 
 /// Pull RTP streams from NATS, and send it to WebRTC
 ///
 // based on [rtp-to-webrtc](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-to-webrtc)
-async fn nats_to_webrtc(offer: String, answer_tx: Sender<String>, subject: String) -> Result<()> {
+async fn nats_to_webrtc(room: String, offer: String, answer_tx: Sender<String>, subject: String) -> Result<()> {
     // build SDP Offer type
     let mut sdp = RTCSessionDescription::default();
     sdp.sdp_type = RTCSdpType::Offer;
@@ -362,7 +393,7 @@ async fn nats_to_webrtc(offer: String, answer_tx: Sender<String>, subject: Strin
     // HACK_MEDIA.lock().unwrap().push("video".to_string());
 
     let mut tracks = HashMap::new();
-    let media = HACK_MEDIA.lock().unwrap().clone(); // TODO: avoid this?
+    let media = HACK_STATE.lock().unwrap().rooms.get(&room).unwrap().user_track_to_mime.clone(); // TODO: avoid this?
     for ((user, track_id), mime) in media {
         let mime = match mime.as_ref() {
             "video" => MIME_TYPE_VP8,
@@ -585,17 +616,28 @@ struct CreatePubParams {
 
 #[post("/create/room")]
 async fn create_room(params: web::Json<CreateRoomParams>) -> impl Responder {
-    // TODO: save to cache
-    info!("{:?}", params);
-    "TODO: room set"
+    // TODO: save to cache that shared across instances
+    info!("create room: {:?}", params);
+    if let Some(token) = params.token.clone() {
+        let mut state = HACK_STATE.lock().unwrap();
+        let mut room = state.rooms.entry(params.room.clone()).or_default();
+        room.sub_token = token;
+    }
+    "room set"
 }
 
 
 #[post("/create/pub")]
 async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
-    // TODO: save to cache
-    info!("{:?}", params);
-    "TODO: pub set"
+    // TODO: save to cache that shared across instances
+    info!("create pub: {:?}", params);
+    if let Some(token) = params.token.clone() {
+        let mut state = HACK_STATE.lock().unwrap();
+        let room = state.rooms.entry(params.room.clone()).or_default();
+        let pub_token = room.pub_tokens.entry(params.id.clone()).or_default();
+        *pub_token = token;
+    }
+    "pub set"
 }
 
 
@@ -606,12 +648,25 @@ async fn publish(auth: BearerAuth,
                  sdp: web::Bytes) -> impl Responder {
                  // web::Json(sdp): web::Json<RTCSessionDescription>) -> impl Responder {
     let (room, id) = path.into_inner();
+
     // TODO: verify "Content-Type: application/sdp"
+
+    // token verification
+    {
+        let mut state = HACK_STATE.lock().unwrap();
+        let room = state.rooms.entry(room.clone()).or_default();
+        let token = room.pub_tokens.get(&id);
+        if let Some(token) = token {
+            if token != auth.token() {
+                return HttpResponse::Unauthorized().body("bad token");
+            }
+        }
+    }
+
     let sdp = String::from_utf8(sdp.to_vec()).unwrap(); // FIXME: no unwrap
     info!("pub: auth {} sdp {:?}", auth.token(), sdp);
-    // TODO: token verification
     let (tx, rx) = tokio::sync::oneshot::channel();
-    tokio::spawn(webrtc_to_nats(id.clone(), sdp, tx, format!("rtc.{}.{}", room, id)));
+    tokio::spawn(webrtc_to_nats(room.clone(), id.clone(), sdp, tx, format!("rtc.{}.{}", room, id)));
     // TODO: timeout
     let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
     info!("SDP answer: {}", sdp_answer);
@@ -626,13 +681,22 @@ async fn subscribe_all(auth: BearerAuth,
                        path: web::Path<String>,
                        sdp: web::Bytes) -> impl Responder {
     let room = path.into_inner();
+
     // TODO: verify "Content-Type: application/sdp"
-    // TODO: token verification
-    // auth.token().to_string()
+
+    // token verification
+    {
+        let mut state = HACK_STATE.lock().unwrap();
+        let room = state.rooms.entry(room.clone()).or_default();
+        if room.sub_token != auth.token() {
+            return HttpResponse::Unauthorized().body("bad token");
+        }
+    }
+
     let sdp = String::from_utf8(sdp.to_vec()).unwrap(); // FIXME: no unwrap
     info!("sub_all: auth {} sdp {:?}", auth.token(), sdp);
     let (tx, rx) = tokio::sync::oneshot::channel();
-    tokio::spawn(nats_to_webrtc(sdp, tx, format!("rtc.{}.*.*", room)));
+    tokio::spawn(nats_to_webrtc(room.clone(), sdp, tx, format!("rtc.{}.*.*", room)));
     // TODO: timeout
     let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
     info!("SDP answer: {}", sdp_answer);
