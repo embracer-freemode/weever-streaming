@@ -23,7 +23,8 @@ use webrtc::data::data_channel::RTCDataChannel;
 use std::sync::Arc;
 use std::collections::HashMap;
 use tokio::time::Duration;
-use tokio::sync::oneshot::Sender;
+use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 // use actix_cors::Cors;
@@ -62,7 +63,7 @@ struct Room {
 struct PeerConnetionInfo {
     name: String,
     // pc: Option<RTCPeerConnection>,
-    notify_renegotiation: Arc<Notify>,
+    notify_message: Option<Arc<mpsc::Sender<String>>>,  // TODO: special enum for all the cases
     // notify_close: ...,
 }
 
@@ -73,7 +74,7 @@ static HACK_STATE: Lazy<Mutex<State>> = Lazy::new(|| Default::default());
 /// Extract RTP streams from WebRTC, and send it to NATS
 ///
 /// based on [rtp-forwarder](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-forwarder) example
-async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: Sender<String>, subject: String) -> Result<()> {
+async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, subject: String) -> Result<()> {
     // NATS
     // TODO: share NATS connection
     info!("connecting NATS");
@@ -257,17 +258,43 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: Se
 
     // Set the handler for Peer connection state
     // This will notify you when the peer has connected/disconnected
+    let room2 = room.clone();   // TODO: avoid this?
+    let user2 = user.clone();   // TODO: avoid this?
     peer_connection
         .on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
             info!("Peer Connection State has changed: {}", s);
+
+            let room2 = room2.clone();   // TODO: avoid this?
+            let user2 = user2.clone();   // TODO: avoid this?
 
             if s == RTCPeerConnectionState::Failed {
                 // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
                 // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
                 // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
                 info!("Peer Connection has gone to failed exiting: Done forwarding");
+
                 // TODO: cleanup?
                 // std::process::exit(0);
+            }
+
+            if s == RTCPeerConnectionState::Disconnected {
+                // TODO: also remove the media from state
+
+                // tell subscribers a new publisher just leave
+                // ask subscribers to renegotiation
+                return Box::pin(async move {
+                    let room2 = room2.clone();   // TODO: avoid this?
+                    let user2 = user2.clone();   // TODO: avoid this?
+                    let subs = {
+                        let state = HACK_STATE.lock().unwrap();
+                        let room = state.rooms.get(&room2).unwrap();
+                        room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
+                    };
+                    for sub in subs {
+                        // TODO: special enum for all the cases
+                        sub.send(format!("PUB_LEFT {}", user2)).await;
+                    }
+                });
             }
 
             // if s == RTCPeerConnectionState::Connected {
@@ -305,12 +332,17 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: Se
         warn!("generate local_description failed!");
     }
 
+    // tell subscribers a new publisher just join
     // ask subscribers to renegotiation
     {
-        let mut state = HACK_STATE.lock().unwrap();
-        let room = state.rooms.get_mut(&room).unwrap();
-        for (_, user) in room.sub_peers.iter() {
-            user.notify_renegotiation.notify_one();
+        let subs = {
+            let state = HACK_STATE.lock().unwrap();
+            let room = state.rooms.get(&room).unwrap();
+            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
+        };
+        for sub in subs {
+            // TODO: special enum for all the cases
+            sub.send(format!("PUB_JOIN {}", user)).await;
         }
     }
 
@@ -325,7 +357,7 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: Se
 /// Pull RTP streams from NATS, and send it to WebRTC
 ///
 // based on [rtp-to-webrtc](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-to-webrtc)
-async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: Sender<String>, subject: String) -> Result<()> {
+async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, subject: String) -> Result<()> {
     // build SDP Offer type
     let mut sdp = RTCSessionDescription::default();
     sdp.sdp_type = RTCSdpType::Offer;
@@ -442,12 +474,12 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: Se
     let pc = Arc::clone(&peer_connection);
 
     // set notify
-    let notify_renegotiation = Arc::new(Notify::new());
+    let (sender, receiver) = mpsc::channel(10);
     {
         let mut state = HACK_STATE.lock().unwrap();
         let room = state.rooms.get_mut(&room).unwrap();
         let user = room.sub_peers.entry(user).or_default();
-        user.notify_renegotiation = notify_renegotiation.clone();
+        user.notify_message = Some(Arc::new(sender));
     }
 
     peer_connection
@@ -469,9 +501,12 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: Se
     // Register data channel creation handling
     let pc = Arc::clone(&peer_connection);  // TODO: avoid this?
     let tracks2 = Arc::clone(&tracks);       // TODO: avoid this?
+    let notify_message = Arc::new(tokio::sync::Mutex::new(receiver));
+    // tokio::pin!(notify_message);
+    // let mut notify_message = std::boxed::Box::pin(receiver);
     peer_connection
         .on_data_channel(Box::new(move |dc: Arc<RTCDataChannel>| {
-            let notify_renegotiation = notify_renegotiation.clone();    // TODO: avoid this?
+            let notify_message = Arc::clone(&notify_message);    // TODO: avoid this?
             let room = room.clone();    // TODO: avoid this?
             let pc = Arc::clone(&pc);  // TODO: avoid this?
             let pc2 = Arc::clone(&pc);  // TODO: avoid this?
@@ -501,12 +536,13 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: Se
                     Box::pin(async move {
                         let mut tracks2 = Arc::clone(&tracks2);       // TODO: avoid this?
                         let mut result = Result::<usize>::Ok(0);
+                        let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
                         while result.is_ok() {
                             let timeout = tokio::time::sleep(Duration::from_secs(5));
                             tokio::pin!(timeout);
 
                             tokio::select! {
-                                _ = notify_renegotiation.notified() => {
+                                msg = notify_message.recv() => {
                                     let media = HACK_STATE.lock().unwrap().rooms.get(&room).unwrap().user_track_to_mime.clone(); // TODO: avoid this?
 
                                     let videos = media.iter().filter(|(_, mime)| mime.as_str() == "video").count();
@@ -551,6 +587,7 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: Se
                                         });
                                     }
 
+                                    dc2.send_text(msg.unwrap()).await;
                                     dc2.send_text(format!("RENEGOTIATION videos {} audios {}", videos, audios)).await;
                                 },
                                 _ = timeout.as_mut() => {

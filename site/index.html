@@ -184,6 +184,21 @@ window.runSubscriber = () => {
         return;
     }
 
+    if (e.data.startsWith("PUB_JOIN ") == true) {
+      const words = e.data.split(" ");
+      let id = words[1];
+      // do something
+    }
+
+    if (e.data.startsWith("PUB_LEFT ") == true) {
+      const words = e.data.split(" ");
+      let id = words[1];
+      div = document.getElementById(`media-${id}`)
+      if (div != null) {
+        div.remove();
+      }
+    }
+
     if (e.data.startsWith("RENEGOTIATION ") == true) {
       const words = e.data.split(" ");
       let videos = parseInt(words[2], 10);
