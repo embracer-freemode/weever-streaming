@@ -177,7 +177,62 @@ window.runSubscriber = () => {
   let sendChannel = sub_pc.createDataChannel("control")
   sendChannel.onclose = () => console.log("sendChannel has closed")
   sendChannel.onopen = () => console.log("sendChannel has opened")
-  sendChannel.onmessage = e => log(`Message from DataChannel "${sendChannel.label}" payload "${e.data}"`)
+  sendChannel.onmessage = e => {
+    log(`Message from DataChannel "${sendChannel.label}" payload "${e.data}"`);
+
+    if (sendChannel.label != "control") {
+        return;
+    }
+
+    if (e.data.startsWith("RENEGOTIATION ") == true) {
+      const words = e.data.split(" ");
+      let videos = parseInt(words[2], 10);
+      let audios = parseInt(words[4], 10);
+
+      let current_videos = 0;
+      let current_audios = 0;
+      for (let transceiver of sub_pc.getTransceivers()) {
+        if (transceiver.receiver.track.kind == "video") {
+          current_videos += 1;
+        } else if (transceiver.receiver.track.kind == "audio") {
+          current_audios += 1;
+        }
+      }
+
+      if (videos > current_videos) {
+        // add more video transceivers
+        for (const _ in Array(videos - current_videos).keys()) {
+          sub_pc.addTransceiver("video", {"direction": "recvonly"})
+        }
+      }
+
+      if (audios > current_audios) {
+        // add more audio transceivers
+        for (const _ in Array(audios - current_audios).keys()) {
+          sub_pc.addTransceiver("audio", {"direction": "recvonly"})
+        }
+      }
+
+      // TODO: remove transceivers?
+      // TODO: better transceivers or trakcs update mechanism?
+
+      sub_pc.createOffer()
+        .then(offer => {
+          log("created SDP offer again")
+          sub_pc.setLocalDescription(offer);
+          document.getElementById("subLocalSessionDescription").value = offer.sdp;
+          sendChannel.send("SDP_OFFER " + offer.sdp);
+        })
+        .catch(log);
+    }
+
+    if (e.data.startsWith("SDP_ANSWER ") == true) {
+      log("set SDP answer again")
+      let answer = e.data.slice(11);
+      document.getElementById("subRemoteSessionDescription").value = answer;
+      sub_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
+    }
+  }
 
   window.subSendMessage = () => {
     let message = document.getElementById("sub_dc").value
@@ -220,11 +275,13 @@ window.runSubscriber = () => {
     document.getElementById("sub_videos").appendChild(div)
   }
 
-  // Offer to receive 3 video tracks, 3 audio tracks
+  // Offer to receive 4 video tracks, 4 audio tracks
   // TODO: dynamically create this
   sub_pc.addTransceiver("video", {"direction": "recvonly"})
   sub_pc.addTransceiver("video", {"direction": "recvonly"})
   sub_pc.addTransceiver("video", {"direction": "recvonly"})
+  sub_pc.addTransceiver("video", {"direction": "recvonly"})
+  sub_pc.addTransceiver("audio", {"direction": "recvonly"})
   sub_pc.addTransceiver("audio", {"direction": "recvonly"})
   sub_pc.addTransceiver("audio", {"direction": "recvonly"})
   sub_pc.addTransceiver("audio", {"direction": "recvonly"})
@@ -260,5 +317,8 @@ window.runSubscriber = () => {
 textarea {
     width: 500px;
     min-height: 375px;
+}
+video {
+    max-height: 200;
 }
 </style>
