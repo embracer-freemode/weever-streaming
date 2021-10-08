@@ -207,7 +207,7 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
                     let media_ssrc = track.ssrc();
                     let pc2 = Arc::clone(&pc);
                     tokio::spawn(async move {
-                        let mut result = Result::<usize>::Ok(0);
+                        let mut result = Ok(0);
                         while result.is_ok() {
                             let timeout = tokio::time::sleep(Duration::from_secs(3));
                             tokio::pin!(timeout);
@@ -535,7 +535,7 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
 
                     Box::pin(async move {
                         let mut tracks2 = Arc::clone(&tracks2);       // TODO: avoid this?
-                        let mut result = Result::<usize>::Ok(0);
+                        let mut result = Ok(0);
                         let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
                         while result.is_ok() {
                             let timeout = tokio::time::sleep(Duration::from_secs(5));
@@ -687,7 +687,7 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
 
     // Read RTP packets forever and send them to the WebRTC Client
     tokio::spawn(async move {
-        use webrtc::error::Error;
+        use webrtc::Error;
         while let Some(msg) = sub.next().await {
             let raw_rtp = msg.data;
 
@@ -709,7 +709,7 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
 
             if let Err(err) = track.write(&raw_rtp).await {
                 error!("nats forward err: {:?}", err);
-                if Error::ErrClosedPipe.equal(&err) {
+                if Error::ErrClosedPipe == err {
                     // The peerConnection has been closed.
                     return;
                 } else {
