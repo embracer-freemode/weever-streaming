@@ -154,6 +154,9 @@ message: <input id="sub_dc" type="text"></input><br/>
 Logs<br/>
 <div id="sub_log"></div>
 <script>
+  foo = "";
+  bar = "";
+  aaa = "";
 window.runSubscriber = () => {
   let log = msg => {
     document.getElementById("sub_log").innerHTML += msg + "<br>"
@@ -166,6 +169,22 @@ window.runSubscriber = () => {
       }
     ]
   });
+    foo = sub_pc;
+
+  // TODO: is there any API under PeerConnection can do this?
+  class DefaultDict {
+     constructor(defaultInit) {
+        return new Proxy({}, {
+           get: (target, name) => name in target ?
+              target[name] : (target[name] = typeof defaultInit === 'function' ?
+                 new defaultInit().valueOf() :
+                 defaultInit)
+        })
+     }
+  }
+
+  id_to_track_events = new DefaultDict(Array);
+    aaa = id_to_track_events;
 
   sub_pc.oniceconnectionstatechange = e => log(sub_pc.iceConnectionState);
   sub_pc.onicecandidate = event => {
@@ -195,8 +214,16 @@ window.runSubscriber = () => {
       let id = words[1];
       div = document.getElementById(`media-${id}`)
       if (div != null) {
-        div.remove();
+        log(`remove media elements for ${id}`);
+        // div.remove();
       }
+      id_to_track_events[id].forEach(event => {
+          log(`remove track ${event.track.id}`);
+          console.log(event);
+          // sub_pc.removeTrack(event.transceiver.sender);
+          // event.transceiver.stop();
+      });
+      // delete id_to_track_events[id];
     }
 
     if (e.data.startsWith("RENEGOTIATION ") == true) {
@@ -278,6 +305,14 @@ window.runSubscriber = () => {
 
     var div;
     div = document.getElementById(`media-${id}`)
+
+    // cache it for later cleanup
+    // TODO: is there any API under PeerConnection can do this?
+    // TODO: we can only get the track GUID here? any other API?
+    log(`add track ${id} ${event.track.id}`);
+    id_to_track_events[id].push(event);
+    console.log(event);                      // TODO: remove this
+
     if (div == null) {
       div = document.createElement("div")
       div.id = `media-${id}`
