@@ -203,6 +203,8 @@ window.runSubscriber = () => {
       const words = e.data.split(" ");
       let videos = parseInt(words[2], 10);
       let audios = parseInt(words[4], 10);
+      log(`all_videos ${videos}`);
+      log(`all_audios ${audios}`);
 
       let current_videos = 0;
       let current_audios = 0;
@@ -213,18 +215,22 @@ window.runSubscriber = () => {
           current_audios += 1;
         }
       }
+      log(`current_videos ${current_videos}`);
+      log(`current_audios ${current_audios}`);
 
       if (videos > current_videos) {
         // add more video transceivers
-        for (const _ in Array(videos - current_videos).keys()) {
+        for (const _ of Array(videos - current_videos).keys()) {
           sub_pc.addTransceiver("video", {"direction": "recvonly"})
+          log("add video transceiver");
         }
       }
 
       if (audios > current_audios) {
         // add more audio transceivers
-        for (const _ in Array(audios - current_audios).keys()) {
+        for (const _ of Array(audios - current_audios).keys()) {
           sub_pc.addTransceiver("audio", {"direction": "recvonly"})
+          log("add audio transceiver");
         }
       }
 
@@ -290,15 +296,9 @@ window.runSubscriber = () => {
     document.getElementById("sub_videos").appendChild(div)
   }
 
-  // Offer to receive 4 video tracks, 4 audio tracks
+  // Offer to receive 1 video tracks, 1 audio tracks
   // TODO: dynamically create this
   sub_pc.addTransceiver("video", {"direction": "recvonly"})
-  sub_pc.addTransceiver("video", {"direction": "recvonly"})
-  sub_pc.addTransceiver("video", {"direction": "recvonly"})
-  sub_pc.addTransceiver("video", {"direction": "recvonly"})
-  sub_pc.addTransceiver("audio", {"direction": "recvonly"})
-  sub_pc.addTransceiver("audio", {"direction": "recvonly"})
-  sub_pc.addTransceiver("audio", {"direction": "recvonly"})
   sub_pc.addTransceiver("audio", {"direction": "recvonly"})
 
   sub_pc.createOffer()
