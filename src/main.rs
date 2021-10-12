@@ -548,8 +548,8 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
                                     let videos = media.iter().filter(|(_, mime)| mime.as_str() == "video").count();
                                     let audios = media.iter().filter(|(_, mime)| mime.as_str() == "audio").count();
 
-                                    for ((user, track_id), mime) in media {
-                                        if tracks2.read().unwrap().contains_key(&(user.clone(), track_id.clone())) {
+                                    for ((pub_user, track_id), mime) in media {
+                                        if tracks2.read().unwrap().contains_key(&(pub_user.clone(), track_id.clone())) {
                                             continue;
                                         }
 
@@ -559,7 +559,8 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
                                             _ => unreachable!(),
                                         };
 
-                                        info!("add new track for {} {}", user, track_id);
+                                        // info!("{} add new track for {} {}", user, pub_user, track_id);   // TODO: or use tracing's span
+                                        info!("add new track for {} {}", pub_user, track_id);
 
                                         let track = Arc::new(TrackLocalStaticRTP::new(
                                             RTCRtpCodecCapability {
@@ -567,11 +568,11 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
                                                 ..Default::default()
                                             },
                                             track_id.to_string(),       // TODO: verify it, id to media id
-                                            user.to_string(),           // TODO: verify it, msid to user
+                                            pub_user.to_string(),       // TODO: verify it, msid to user
                                         ));
 
                                         // for later dyanmic RTP dispatch from NATS
-                                        tracks2.write().unwrap().insert((user, track_id), track.clone());
+                                        tracks2.write().unwrap().insert((pub_user, track_id), track.clone());
                                         let pc = Arc::clone(&pc);
 
                                         // Read incoming RTCP packets
