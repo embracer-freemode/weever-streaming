@@ -1,6 +1,6 @@
 //! WebRTC SFU with horizontal scale design
 
-use anyhow::Result;
+use anyhow::{Result, Context};
 use log::{debug, info, warn, error};
 use interceptor::registry::Registry;
 use rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
@@ -32,14 +32,38 @@ use actix_web_httpauth::extractors::bearer::BearerAuth;
 use actix_files::Files;
 use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
+use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
+use tracing::{Instrument, info_span};
 use std::sync::Mutex;
 use std::sync::RwLock;
 
 
 fn main() -> Result<()> {
-    // TODO: use tracking crate with more span info
-    env_logger::init();
+    // logger
+    // bridge "log" crate and "tracing" crate
+    tracing_log::LogTracer::init()?;
+    // create "logs" dir if not exist
+    if !std::path::Path::new("./logs").is_dir() {
+        std::fs::create_dir("logs")?;
+    }
+    // logfile writer
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
+    let file = format!("rtc.{}.log", now);
+    let file_appender = tracing_appender::rolling::never("logs", file);
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    // compose our complex logger
+    // 1. filter via RUST_LOG env
+    // 2. output to stdout
+    // 3. output to logfile
+    let subscriber = tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env())    // RUST_LOG env filter
+        .with(fmt::Layer::new().with_writer(std::io::stdout))
+        .with(fmt::Layer::new().with_writer(non_blocking));
+    // set our logger as global default
+    tracing::subscriber::set_global_default(subscriber).context("Unable to set global collector")?;
+
     web_main()?;
+
     Ok(())
 }
 
@@ -73,6 +97,7 @@ static HACK_STATE: Lazy<Mutex<State>> = Lazy::new(|| Default::default());
 /// Extract RTP streams from WebRTC, and send it to NATS
 ///
 /// based on [rtp-forwarder](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-forwarder) example
+#[tracing::instrument(name = "pub", skip(offer, answer_tx, subject), level = "info")]  // following log will have "client{id=...}" in INFO level
 async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, subject: String) -> Result<()> {
     // NATS
     // TODO: share NATS connection
@@ -241,14 +266,14 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
 
                 Box::pin(async {})
             },
-        ))
+        )).instrument(info_span!("pub"))
         .await;
 
     // Set the handler for ICE connection state
     // This will notify you when the peer has connected/disconnected
     peer_connection
         .on_ice_connection_state_change(Box::new(move |connection_state: RTCIceConnectionState| {
-            info!("Connection State has changed {}", connection_state);
+            info!("pub: Connection State has changed {}", connection_state);
             // if connection_state == RTCIceConnectionState::Connected {
             // }
             Box::pin(async {})
@@ -261,7 +286,7 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
     let user2 = user.clone();   // TODO: avoid this?
     peer_connection
         .on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
-            info!("Peer Connection State has changed: {}", s);
+            info!("pub: Peer Connection State has changed: {}", s);
 
             let room2 = room2.clone();   // TODO: avoid this?
             let user2 = user2.clone();   // TODO: avoid this?
@@ -373,6 +398,7 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
 /// Pull RTP streams from NATS, and send it to WebRTC
 ///
 // based on [rtp-to-webrtc](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-to-webrtc)
+#[tracing::instrument(name = "sub", skip(offer, answer_tx, subject), level = "info")]  // following log will have "client{id=...}" in INFO level
 async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, subject: String) -> Result<()> {
     // build SDP Offer type
     let mut sdp = RTCSessionDescription::default();
@@ -500,6 +526,7 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
         tokio::spawn(async move {
             let mut rtcp_buf = vec![0u8; 1500];
             while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+            info!("sub: leaving RTP sender read");
             Result::<()>::Ok(())
         });
     }
@@ -519,12 +546,12 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
 
     peer_connection
         .on_ice_connection_state_change(Box::new(move |connection_state: RTCIceConnectionState| {
-            info!("Connection State has changed {}", connection_state);
+            info!("sub: Connection State has changed {}", connection_state);
             let pc2 = Arc::clone(&pc);
             Box::pin(async move {
                 if connection_state == RTCIceConnectionState::Failed {
                     if let Err(err) = pc2.close().await {
-                        info!("peer connection close err: {}", err);
+                        info!("sub: peer connection close err: {}", err);
                         // TODO: cleanup?
                         // std::process::exit(0);
                     }
@@ -580,7 +607,7 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
                     info!("Data channel '{}'-'{}' open", dc_label2, dc_id2);
 
                     Box::pin(async move {
-                        let mut tracks2 = Arc::clone(&tracks2);       // TODO: avoid this?
+                        let tracks2 = Arc::clone(&tracks2);       // TODO: avoid this?
                         let rtp_senders2 = Arc::clone(&rtp_senders2);    // TODO: avoid this?
                         let mut result = Ok(0);
                         let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
@@ -660,6 +687,9 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
                                                 pub_user.to_string(),   // msid, group id part
                                             ));
 
+                                            // for later dyanmic RTP dispatch from NATS
+                                            tracks2.write().unwrap().insert((pub_user.to_string(), track_id.to_string()), track.clone());
+
                                             // TODO: cleanup old track
                                             user_media_to_tracks2.write().unwrap().entry((pub_user.to_string(), app_id.to_string()))
                                                 .and_modify(|e| *e = track.clone())
@@ -670,11 +700,13 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
                                                 let user_media_to_senders = user_media_to_senders2.read().unwrap();
                                                 user_media_to_senders.get(&(pub_user.to_string(), app_id.to_string())).cloned().clone()
                                             };
+
                                             if let Some(sender) = sender {
                                                 // reuse RtcRTPSender
                                                 // apply new track
                                                 info!("switch track for {} {}", pub_user, track_id);
-                                                sender.replace_track(Some(track.clone())).await;
+                                                sender.replace_track(Some(track.clone())).await.unwrap();
+                                                info!("switch track for {} {} done", pub_user, track_id);
                                             } else {
                                                 // add tracck to pc
                                                 // insert rtp sender to cache
@@ -698,12 +730,10 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
                                                     user_media_to_senders2.write().unwrap().insert((pub_user.clone(), app_id.to_string()), rtp_sender.clone());
                                                     let mut rtcp_buf = vec![0u8; 1500];
                                                     while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+                                                    info!("sub: leaving RTP sender read");
                                                     Result::<()>::Ok(())
-                                                });
+                                                }.instrument(info_span!("sub")));
                                             }
-
-                                            // for later dyanmic RTP dispatch from NATS
-                                            tracks2.write().unwrap().insert((pub_user, track_id), track.clone());
                                         }
                                     }
 
@@ -717,7 +747,7 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
                                 }
                             };
                         }
-                    })
+                    }.instrument(info_span!("sub")))
                 })).await;
 
                 // Register text message handling
@@ -747,7 +777,7 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
                                 info!("sent new SDP answer");
                                 dc3.send_text(format!("SDP_ANSWER {}", answer.sdp)).await;
                             }
-                        });
+                        }.instrument(info_span!("sub")));
                     }
 
                     // FIXME: remove this?
@@ -768,13 +798,13 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
     // This will notify you when the peer has connected/disconnected
     peer_connection
         .on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
-            info!("Peer Connection State has changed: {}", s);
+            info!("sub: Peer Connection State has changed: {}", s);
 
             if s == RTCPeerConnectionState::Failed {
                 // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
                 // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
                 // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-                info!("Peer Connection has gone to failed exiting: Done forwarding");
+                info!("sub: Peer Connection has gone to failed exiting: Done forwarding");
                 // TODO: cleanup?
                 // std::process::exit(0);
             }
