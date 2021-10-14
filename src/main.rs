@@ -13,6 +13,12 @@ use webrtc::media::rtp::rtp_sender::RTCRtpSender;
 use webrtc::media::track::track_remote::TrackRemote;
 use webrtc::media::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
 use webrtc::media::track::track_local::{TrackLocal, TrackLocalWriter};
+use webrtc::peer::peer_connection::RTCPeerConnection;
+use webrtc::peer::peer_connection::{
+    OnTrackHdlrFn,
+    OnICEConnectionStateChangeHdlrFn,
+    OnPeerConnectionStateChangeHdlrFn,
+};
 use webrtc::peer::configuration::RTCConfiguration;
 use webrtc::peer::ice::ice_connection_state::RTCIceConnectionState;
 use webrtc::peer::ice::ice_server::RTCIceServer;
@@ -94,202 +100,218 @@ struct PeerConnetionInfo {
 
 static HACK_STATE: Lazy<Mutex<State>> = Lazy::new(|| Default::default());
 
-/// Extract RTP streams from WebRTC, and send it to NATS
-///
-/// based on [rtp-forwarder](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-forwarder) example
-#[tracing::instrument(name = "pub", skip(offer, answer_tx, subject), level = "info")]  // following log will have "client{id=...}" in INFO level
-async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, subject: String) -> Result<()> {
-    // NATS
-    // TODO: share NATS connection
-    info!("connecting NATS");
-    let nc = nats::asynk::connect("localhost").await?;
 
-    // Create a MediaEngine object to configure the supported codec
-    info!("creating MediaEngine");
-    let mut m = MediaEngine::default();
+/////////////
+// Publisher
+/////////////
 
-    // Setup the codecs you want to use.
-    // We'll use a VP8 and Opus but you can also define your own
-    m.register_codec(
-        RTCRtpCodecParameters {
-            capability: RTCRtpCodecCapability {
-                mime_type: MIME_TYPE_VP8.to_owned(),
-                clock_rate: 90000,
-                channels: 0,
-                sdp_fmtp_line: "".to_owned(),
-                rtcp_feedback: vec![],
-            },
-            payload_type: 96,
-            ..Default::default()
-        },
-        RTPCodecType::Video,
-    )?;
+struct PublisherDetails {
+    user: String,
+    room: String,
+    pc: Arc<RTCPeerConnection>,
+    nats: nats::asynk::Connection,
+}
 
-    m.register_codec(
-        RTCRtpCodecParameters {
-            capability: RTCRtpCodecCapability {
-                mime_type: MIME_TYPE_OPUS.to_owned(),
-                clock_rate: 48000,
-                channels: 2,
-                sdp_fmtp_line: "".to_owned(),
-                rtcp_feedback: vec![],
-            },
-            payload_type: 111,
-            ..Default::default()
-        },
-        RTPCodecType::Audio,
-    )?;
-
-    // Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
-    // This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
-    // this is enabled by default. If you are manually managing You MUST create a InterceptorRegistry
-    // for each PeerConnection.
-    let mut registry = Registry::new();
-
-    // Use the default set of Interceptors
-    registry = register_default_interceptors(registry, &mut m)?;
-
-    // Create the API object with the MediaEngine
-    let api = APIBuilder::new()
-        .with_media_engine(m)
-        .with_interceptor_registry(registry)
-        .build();
-
-    // Prepare the configuration
-    info!("preparing RTCConfiguration");
-    let config = RTCConfiguration {
-        ice_servers: vec![RTCIceServer {
-            urls: vec!["stun:stun.l.google.com:19302".to_owned()],
-            ..Default::default()
-        }],
-        ..Default::default()
-    };
-
-    // Create a new RTCPeerConnection
-    let peer_connection = Arc::new(api.new_peer_connection(config).await?);
-
-    // TODO: more efficent way?
-    // TODO: limitation for safety?
-    //
-    // Allow us to receive N video/audio tracks based on SDP Offer
-    // sample of SDP line: "m=video 9 UDP/TLS/RTP/SAVPF 96"
-    for sdp_media in offer.rsplit_terminator("m=") {
-        let msid = sdp_media.rsplit_once("msid:");
-        if msid.is_none() {
-            continue;
-        }
-        let (_, msid) = msid.unwrap();
-        let id = msid.split_whitespace().take(2).skip(1).next();
-        if id.is_none() {
-            continue;
-        }
-        let id = id.unwrap();
-
-        // TODO: global cache for media count
-        if sdp_media.starts_with("video") {
-            // FIXME: use better way
-            // TODO: add id in
-            {
-                let room_info = HACK_STATE.lock();
-                let mut room_info = room_info.unwrap();
-                let room_info = room_info.rooms.entry(room.clone()).or_default();
-                room_info.user_track_to_mime.insert((user.clone(), id.to_string()), "video".to_string());
-            }
-            peer_connection
-                .add_transceiver_from_kind(RTPCodecType::Video, &[])
-                .await?;
-        } else if sdp_media.starts_with("audio") {
-            // FIXME: use better way
-            // TODO: add id in
-            {
-                let room_info = HACK_STATE.lock();
-                let mut room_info = room_info.unwrap();
-                let room_info = room_info.rooms.entry(room.clone()).or_default();
-                room_info.user_track_to_mime.insert((user.clone(), id.to_string()), "audio".to_string());
-            }
-            peer_connection
-                .add_transceiver_from_kind(RTPCodecType::Audio, &[])
-                .await?;
-        }
+impl PublisherDetails {
+    fn get_nats_subect(&self) -> String {
+        format!("rtc.{}.{}", self.room, self.user)
     }
 
-    // build SDP Offer type
-    let mut sdp = RTCSessionDescription::default();
-    sdp.sdp_type = RTCSdpType::Offer;
-    sdp.sdp = offer;
-    let offer = sdp;
+    async fn create_pc() -> Result<RTCPeerConnection, webrtc::Error> {
+        // Create a MediaEngine object to configure the supported codec
+        info!("creating MediaEngine");
+        let mut m = MediaEngine::default();
 
-    // Set a handler for when a new remote track starts, this handler will forward data to
-    // our UDP listeners.
-    // In your application this is where you would handle/process audio/video
-    let pc = Arc::clone(&peer_connection);
-    peer_connection
-        .on_track(Box::new(
-            move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
-                if let Some(track) = track {
-                    // Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
-                    let media_ssrc = track.ssrc();
-                    let pc2 = Arc::clone(&pc);
-                    tokio::spawn(async move {
-                        let mut result = Ok(0);
-                        while result.is_ok() {
-                            let timeout = tokio::time::sleep(Duration::from_secs(3));
-                            tokio::pin!(timeout);
-
-                            tokio::select! {
-                                _ = timeout.as_mut() =>{
-                                    result = pc2.write_rtcp(&PictureLossIndication{
-                                            sender_ssrc: 0,
-                                            media_ssrc,
-                                    }).await;
-                                }
-                            };
-                        }
-                    });
-
-                    let nc = nc.clone();
-                    // push RTP to NATS
-                    // use ID to disquish streams from same publisher
-                    // TODO: can we use SSRC?
-                    let subject = subject.clone(); // FIXME: avoid this
-                    tokio::spawn(async move {
-                        // FIXME: the id here generated from browser might be "{...}"
-                        let subject = format!("{}.{}", subject, track.id().await);
-                        info!("publish to {}", subject);
-                        let mut b = vec![0u8; 1500];
-                        while let Ok((n, _)) = track.read(&mut b).await {
-                            nc.publish(&subject, &b[..n]).await?;
-                        }
-                        Result::<()>::Ok(())
-                    });
-                }
-
-                Box::pin(async {})
+        // Setup the codecs you want to use.
+        // We'll use a VP8 and Opus but you can also define your own
+        m.register_codec(
+            RTCRtpCodecParameters {
+                capability: RTCRtpCodecCapability {
+                    mime_type: MIME_TYPE_VP8.to_owned(),
+                    clock_rate: 90000,
+                    channels: 0,
+                    sdp_fmtp_line: "".to_owned(),
+                    rtcp_feedback: vec![],
+                },
+                payload_type: 96,
+                ..Default::default()
             },
-        )).instrument(info_span!("pub"))
-        .await;
+            RTPCodecType::Video,
+        )?;
 
-    // Set the handler for ICE connection state
-    // This will notify you when the peer has connected/disconnected
-    peer_connection
-        .on_ice_connection_state_change(Box::new(move |connection_state: RTCIceConnectionState| {
-            info!("pub: Connection State has changed {}", connection_state);
+        m.register_codec(
+            RTCRtpCodecParameters {
+                capability: RTCRtpCodecCapability {
+                    mime_type: MIME_TYPE_OPUS.to_owned(),
+                    clock_rate: 48000,
+                    channels: 2,
+                    sdp_fmtp_line: "".to_owned(),
+                    rtcp_feedback: vec![],
+                },
+                payload_type: 111,
+                ..Default::default()
+            },
+            RTPCodecType::Audio,
+        )?;
+
+        // Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
+        // This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
+        // this is enabled by default. If you are manually managing You MUST create a InterceptorRegistry
+        // for each PeerConnection.
+        let mut registry = Registry::new();
+
+        // Use the default set of Interceptors
+        registry = register_default_interceptors(registry, &mut m)?;
+
+        // Create the API object with the MediaEngine
+        let api = APIBuilder::new()
+            .with_media_engine(m)
+            .with_interceptor_registry(registry)
+            .build();
+
+        // Prepare the configuration
+        info!("preparing RTCConfiguration");
+        let config = RTCConfiguration {
+            ice_servers: vec![RTCIceServer {
+                urls: vec!["stun:stun.l.google.com:19302".to_owned()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        info!("creating PeerConnection");
+        // Create a new RTCPeerConnection
+        api.new_peer_connection(config).await
+    }
+
+    async fn add_transceiver_based_on_sdp(&self, offer: &str) -> Result<()> {
+        info!("add tranceivers based on SDP offer");
+
+        // TODO: more efficent way?
+        // TODO: limitation for safety?
+        //
+        // Allow us to receive N video/audio tracks based on SDP Offer
+        // sample of SDP line: "m=video 9 UDP/TLS/RTP/SAVPF 96"
+        for sdp_media in offer.rsplit_terminator("m=") {
+            let msid = sdp_media.rsplit_once("msid:");
+            if msid.is_none() {
+                continue;
+            }
+            let (_, msid) = msid.unwrap();
+            let id = msid.split_whitespace().take(2).skip(1).next();
+            if id.is_none() {
+                continue;
+            }
+            let id = id.unwrap();
+
+            // TODO: global cache for media count
+            if sdp_media.starts_with("video") {
+                // FIXME: use better way
+                // TODO: add id in
+                {
+                    let room_info = HACK_STATE.lock();
+                    let mut room_info = room_info.unwrap();
+                    let room_info = room_info.rooms.entry(self.room.clone()).or_default();
+                    room_info.user_track_to_mime.insert((self.user.clone(), id.to_string()), "video".to_string());
+                }
+                self.pc
+                    .add_transceiver_from_kind(RTPCodecType::Video, &[])
+                    .await?;
+            } else if sdp_media.starts_with("audio") {
+                // FIXME: use better way
+                // TODO: add id in
+                {
+                    let room_info = HACK_STATE.lock();
+                    let mut room_info = room_info.unwrap();
+                    let room_info = room_info.rooms.entry(self.room.clone()).or_default();
+                    room_info.user_track_to_mime.insert((self.user.clone(), id.to_string()), "audio".to_string());
+                }
+                self.pc
+                    .add_transceiver_from_kind(RTPCodecType::Audio, &[])
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Handler for incoming streams
+    fn on_track(&self) -> OnTrackHdlrFn {
+        let span = tracing::Span::current();
+
+        let nc = self.nats.clone();
+        let pc = self.pc.clone();
+        let subject = self.get_nats_subect();
+
+        Box::new(move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
+            let _enter = span.enter();  // populate user & room info in following logs
+
+            if let Some(track) = track {
+                // Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
+                let media_ssrc = track.ssrc();
+                let pc = Arc::clone(&pc);
+                tokio::spawn(async move {
+                    let mut result = Ok(0);
+                    while result.is_ok() {
+                        let timeout = tokio::time::sleep(Duration::from_secs(3));
+                        tokio::pin!(timeout);
+
+                        tokio::select! {
+                            _ = timeout.as_mut() =>{
+                                result = pc.write_rtcp(&PictureLossIndication{
+                                        sender_ssrc: 0,
+                                        media_ssrc,
+                                }).await;
+                            }
+                        };
+                    }
+                }.instrument(span.clone()));
+
+                let nc = nc.clone();
+                let subject = subject.clone();
+                // push RTP to NATS
+                // use ID to disquish streams from same publisher
+                // TODO: can we use SSRC?
+                tokio::spawn(async move {
+                    // FIXME: the id here generated from browser might be "{...}"
+                    let subject = format!("{}.{}", subject, track.id().await);
+                    info!("publish to {}", subject);
+                    let mut b = vec![0u8; 1500];
+                    while let Ok((n, _)) = track.read(&mut b).await {
+                        nc.publish(&subject, &b[..n]).await?;
+                    }
+                    Result::<()>::Ok(())
+                }.instrument(span.clone()));
+            }
+
+            Box::pin(async {})
+        })
+    }
+
+    fn on_ice_connection_state_change(&self) -> OnICEConnectionStateChangeHdlrFn {
+        let span = tracing::Span::current();
+        Box::new(move |connection_state: RTCIceConnectionState| {
+            let _enter = span.enter();  // populate user & room info in following logs
+            info!("ICE Connection State has changed: {}", connection_state);
             // if connection_state == RTCIceConnectionState::Connected {
             // }
             Box::pin(async {})
-        }))
-        .await;
+        })
+    }
 
-    // Set the handler for Peer connection state
-    // This will notify you when the peer has connected/disconnected
-    let room2 = room.clone();   // TODO: avoid this?
-    let user2 = user.clone();   // TODO: avoid this?
-    peer_connection
-        .on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
-            info!("pub: Peer Connection State has changed: {}", s);
+    fn on_peer_connection_state_change(&self) -> OnPeerConnectionStateChangeHdlrFn {
+        let span = tracing::Span::current();
 
-            let room2 = room2.clone();   // TODO: avoid this?
-            let user2 = user2.clone();   // TODO: avoid this?
+        let room = self.room.clone();
+        let user = self.user.clone();
+
+        Box::new(move |s: RTCPeerConnectionState| {
+            let _enter = span.enter();  // populate user & room info in following logs
+
+            info!("PeerConnection State has changed: {}", s);
+
+            let room = room.clone();   // TODO: avoid this?
+            let user = user.clone();   // TODO: avoid this?
 
             if s == RTCPeerConnectionState::Failed {
                 // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
@@ -297,8 +319,7 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
                 // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
                 info!("Peer Connection has gone to failed exiting: Done forwarding");
 
-                // TODO: cleanup?
-                // std::process::exit(0);
+                // TODO: make sure we will cleanup related stuffs
             }
 
             if s == RTCPeerConnectionState::Disconnected {
@@ -307,35 +328,37 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
                 // tell subscribers a new publisher just leave
                 // ask subscribers to renegotiation
                 return Box::pin(async move {
-                    let room2 = room2.clone();   // TODO: avoid this?
-                    let user2 = user2.clone();   // TODO: avoid this?
+                    let room = room.clone();   // TODO: avoid this?
+                    let user = user.clone();   // TODO: avoid this?
 
                     // remove from global state
                     let mut tracks = vec![];    // TODO: better mechanism
                     {
                         let mut state = HACK_STATE.lock().unwrap();
-                        let room = state.rooms.get(&room2).unwrap();
-                        for ((pub_user, track_id), _) in room.user_track_to_mime.iter() {
-                            if pub_user == &user2 {
+                        let room_obj = state.rooms.get(&room).unwrap();
+                        for ((pub_user, track_id), _) in room_obj.user_track_to_mime.iter() {
+                            if pub_user == &user {
                                 tracks.push(track_id.to_string());
                             }
                         }
-                        let user_track_to_mime = &mut state.rooms.get_mut(&room2).unwrap().user_track_to_mime;
+                        let user_track_to_mime = &mut state.rooms.get_mut(&room).unwrap().user_track_to_mime;
                         for track in tracks {
-                            user_track_to_mime.remove(&(user2.to_string(), track.to_string()));
+                            user_track_to_mime.remove(&(user.to_string(), track.to_string()));
                         }
                     }
 
                     let subs = {
                         let state = HACK_STATE.lock().unwrap();
-                        let room = state.rooms.get(&room2).unwrap();
+                        let room = state.rooms.get(&room).unwrap();
                         room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
                     };
                     for sub in subs {
                         // TODO: special enum for all the cases
-                        sub.send(format!("PUB_LEFT {}", user2)).await;
+                        sub.send(format!("PUB_LEFT {}", user)).await;
                     }
                 });
+
+                // TODO: make sure we will cleanup related stuffs
             }
 
             // if s == RTCPeerConnectionState::Connected {
@@ -343,7 +366,69 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
             // }
 
             Box::pin(async {})
-        }))
+        })
+    }
+
+    /// tell subscribers a new publisher just join
+    /// ask subscribers to renegotiation
+    async fn notify_subs_for_join(&self) {
+        info!("notify subscribers for publisher join");
+        let subs = {
+            let state = HACK_STATE.lock().unwrap();
+            let room = state.rooms.get(&self.room).unwrap();
+            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
+        };
+        let user = self.user.clone();
+        for sub in subs {
+            // TODO: special enum for all the cases
+            sub.send(format!("PUB_JOIN {}", user)).await.unwrap();
+        }
+    }
+}
+
+/// Extract RTP streams from WebRTC, and send it to NATS
+///
+/// based on [rtp-forwarder](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-forwarder) example
+#[tracing::instrument(name = "pub", skip(offer, answer_tx), level = "info")]  // following log will have "pub{room=..., user=...}" in INFO level
+async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, tid: u16) -> Result<()> {
+    // NATS
+    // TODO: share NATS connection
+    info!("connecting NATS");
+    let nc = nats::asynk::connect("localhost").await?;
+
+    let peer_connection = Arc::new(PublisherDetails::create_pc().await?);
+    let publisher = PublisherDetails {
+        user: user.clone(),
+        room: room.clone(),
+        pc: peer_connection.clone(),
+        nats: nc.clone()
+    };  // TODO: remove clone
+
+    publisher.add_transceiver_based_on_sdp(&offer).await?;
+
+    // build SDP Offer type
+    let mut sdp = RTCSessionDescription::default();
+    sdp.sdp_type = RTCSdpType::Offer;
+    sdp.sdp = offer;
+    let offer = sdp;
+
+    // Set a handler for when a new remote track starts, this handler will forward data to our UDP listeners.
+    // In your application this is where you would handle/process audio/video
+    peer_connection
+        .on_track(publisher.on_track())
+        .instrument(info_span!("pub"))
+        .await;
+
+    // Set the handler for ICE connection state
+    // This will notify you when the peer has connected/disconnected
+    peer_connection
+        .on_ice_connection_state_change(publisher.on_ice_connection_state_change())
+        .await;
+
+    // Set the handler for Peer connection state
+    // This will notify you when the peer has connected/disconnected
+    peer_connection
+        .on_peer_connection_state_change(publisher.on_peer_connection_state_change())
         .await;
 
     // Set the remote SessionDescription
@@ -368,29 +453,21 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
     // Send out the SDP answer via Sender
     if let Some(local_desc) = peer_connection.local_description().await {
         info!("PC send local SDP");
-        answer_tx.send(local_desc.sdp);
+        answer_tx.send(local_desc.sdp).unwrap();
     } else {
+        // TODO: when will this happen?
         warn!("generate local_description failed!");
     }
 
-    // tell subscribers a new publisher just join
-    // ask subscribers to renegotiation
-    {
-        let subs = {
-            let state = HACK_STATE.lock().unwrap();
-            let room = state.rooms.get(&room).unwrap();
-            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
-        };
-        for sub in subs {
-            // TODO: special enum for all the cases
-            sub.send(format!("PUB_JOIN {}", user)).await;
-        }
-    }
+    publisher.notify_subs_for_join().await;
 
-    // TODO: a signal to close connection?
-    info!("PC wait");
-    tokio::time::sleep(Duration::from_secs(3000)).await;
+    // limit a publisher to 3 hours for now
+    // after 3 hours, we close the connection
+    //
+    // TODO: a signal to trigger it ealier when PC failed
+    tokio::time::sleep(Duration::from_secs(3 * 60 * 60)).await;
     peer_connection.close().await?;
+    info!("leaving main function");
 
     Ok(())
 }
@@ -976,7 +1053,14 @@ async fn publish(auth: BearerAuth,
     let sdp = String::from_utf8(sdp.to_vec()).unwrap(); // FIXME: no unwrap
     debug!("pub: auth {} sdp {:.20?}", auth.token(), sdp);
     let (tx, rx) = tokio::sync::oneshot::channel();
-    tokio::spawn(webrtc_to_nats(room.clone(), id.clone(), sdp, tx, format!("rtc.{}.{}", room, id)));
+
+    // get a time based id to represent following Tokio task for this user
+    // if user call it again later
+    // we will be able to identify in logs
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
+    let tid = now.wrapping_div(10000) as u16;
+
+    tokio::spawn(webrtc_to_nats(room.clone(), id.clone(), sdp, tx, tid));
     // TODO: timeout
     let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
     debug!("SDP answer: {:.20}", sdp_answer);
