@@ -154,9 +154,6 @@ message: <input id="sub_dc" type="text"></input><br/>
 Logs<br/>
 <div id="sub_log"></div>
 <script>
-  foo = "";
-  bar = "";
-  aaa = "";
 window.runSubscriber = () => {
   let log = msg => {
     document.getElementById("sub_log").innerHTML += msg + "<br>"
@@ -169,7 +166,9 @@ window.runSubscriber = () => {
       }
     ]
   });
-    foo = sub_pc;
+
+  // for easier debug and trial only
+  window.sub_pc = sub_pc;
 
   // TODO: is there any API under PeerConnection can do this?
   class DefaultDict {
@@ -184,7 +183,9 @@ window.runSubscriber = () => {
   }
 
   id_to_track_events = new DefaultDict(Array);
-    aaa = id_to_track_events;
+
+  // for easier debug and trial only
+  window.id_to_track_events = id_to_track_events;
 
   sub_pc.oniceconnectionstatechange = e => log(sub_pc.iceConnectionState);
   sub_pc.onicecandidate = event => {
@@ -215,15 +216,18 @@ window.runSubscriber = () => {
       div = document.getElementById(`media-${id}`)
       if (div != null) {
         log(`remove media elements for ${id}`);
-        // div.remove();
+        // remove mode
+        div.remove();
       }
       id_to_track_events[id].forEach(event => {
-          log(`remove track ${event.track.id}`);
           console.log(event);
+          log(`remove track ${event.track.id} kind ${event.track.kind} mid ${event.transceiver.mid}`);
           // sub_pc.removeTrack(event.transceiver.sender);
-          // event.transceiver.stop();
+          // remove mode
+          event.transceiver.stop();
       });
-      // delete id_to_track_events[id];
+      // remove mode
+      delete id_to_track_events[id];
     }
 
     if (e.data.startsWith("RENEGOTIATION ") == true) {
@@ -236,6 +240,9 @@ window.runSubscriber = () => {
       let current_videos = 0;
       let current_audios = 0;
       for (let transceiver of sub_pc.getTransceivers()) {
+        if (transceiver.stopped == true) {
+            continue;
+        }
         if (transceiver.receiver.track.kind == "video") {
           current_videos += 1;
         } else if (transceiver.receiver.track.kind == "audio") {

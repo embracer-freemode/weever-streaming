@@ -817,16 +817,16 @@ impl SubscriberDetails {
 
                             if msg.starts_with("PUB_LEFT ") {
                                 let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
-                                // Self::on_pub_leave(
-                                //     left_user.to_string(),
-                                //     room.clone(),
-                                //     pc.clone(),
-                                //     media.clone(),
-                                //     tracks.clone(),
-                                //     rtp_senders.clone(),
-                                //     user_media_to_tracks.clone(),
-                                //     user_media_to_senders.clone(),
-                                // ).await;
+                                Self::on_pub_leave(
+                                    left_user.to_string(),
+                                    room.clone(),
+                                    pc.clone(),
+                                    media.clone(),
+                                    tracks.clone(),
+                                    rtp_senders.clone(),
+                                    user_media_to_tracks.clone(),
+                                    user_media_to_senders.clone(),
+                                ).await;
                             }
 
                             if msg.starts_with("PUB_JOIN ") {
@@ -1040,7 +1040,10 @@ impl SubscriberDetails {
             if let Some(rtp_sender) = transceiver.sender().await {
                 if let Some(track) = rtp_sender.track().await {
                     if track.stream_id() == left_user {
+                        // this include sender.stop() & receiver.stop() & diection = "inactive"
                         transceiver.stop().await.unwrap();
+                        // TODO: do we need this?
+                        pc.remove_track(&rtp_sender).await.unwrap();
                     }
                 }
             }
