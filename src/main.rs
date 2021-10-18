@@ -808,21 +808,24 @@ impl SubscriberDetails {
                             let msg = msg.unwrap();
 
                             if msg.starts_with("PUB_LEFT ") {
-                                Self::on_pub_leave(
-                                    room.clone(),
-                                    pc.clone(),
-                                    media.clone(),
-                                    tracks.clone(),
-                                    rtp_senders.clone(),
-                                    user_media_to_tracks.clone(),
-                                    user_media_to_senders.clone(),
-                                ).await;
+                                let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
+                                // Self::on_pub_leave(
+                                //     left_user.to_string(),
+                                //     room.clone(),
+                                //     pc.clone(),
+                                //     media.clone(),
+                                //     tracks.clone(),
+                                //     rtp_senders.clone(),
+                                //     user_media_to_tracks.clone(),
+                                //     user_media_to_senders.clone(),
+                                // ).await;
                             }
 
                             if msg.starts_with("PUB_JOIN ") {
-                                // let join_user = msg.splitn(2, " ").skip(1).next().unwrap();
+                                let join_user = msg.splitn(2, " ").skip(1).next().unwrap();
                                 Self::on_pub_join(
                                     room.clone(),
+                                    join_user.to_string(),
                                     pc.clone(),
                                     media.clone(),
                                     tracks.clone(),
@@ -894,12 +897,15 @@ impl SubscriberDetails {
 
     async fn on_pub_join(
             room: String,
+            join_user: String,
             pc: Arc<RTCPeerConnection>,
             media: HashMap<(String, String), String>,
             tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
             rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
             user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
             user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>) {
+
+        info!("pub join: {}", join_user);
 
         // add new track for PUB_JOIN
         for ((pub_user, track_id), mime) in media {
@@ -946,7 +952,6 @@ impl SubscriberDetails {
                 .and_modify(|e| *e = track.clone())
                 .or_insert(track.clone());
 
-            // user_media_to_senders2
             let sender = {
                 let user_media_to_senders = user_media_to_senders.read().unwrap();
                 user_media_to_senders.get(&(pub_user.to_string(), app_id.to_string())).cloned().clone()
@@ -990,35 +995,52 @@ impl SubscriberDetails {
     }
 
     async fn on_pub_leave(
-            _room: String,
-            _pc: Arc<RTCPeerConnection>,
-            _media: HashMap<(String, String), String>,
-            _tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            _rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-            _user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            _user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>) {
+            left_user: String,
+            room: String,
+            pc: Arc<RTCPeerConnection>,
+            media: HashMap<(String, String), String>,
+            tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
+            rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
+            user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
+            user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>) {
+
+        info!("pub leave: {}", left_user);
 
         // delete old track for PUB_LEFT
-        // let left_user = msg.splitn(2, " ").next().unwrap();
-        // let mut remove_targets = vec![];
-        // for ((pub_user, track_id), _) in tracks2.read().unwrap().iter() {
-        //     if pub_user == left_user {
-        //         info!("remove track for {} {}", pub_user, track_id);
-        //         remove_targets.push((pub_user.to_string(), track_id.to_string()));
-        //     }
-        // }
-        // for target in remove_targets {
-        //     tracks2.write().unwrap().remove(&target);
-        //     let rtp_sender = {
-        //         let rtp_senders = rtp_senders2.read().unwrap();
-        //         rtp_senders.get(&target).unwrap().clone()
-        //     };
-        //     // remove track from subscriber's PeerConnection
-        //     pc.remove_track(&rtp_sender).await.unwrap();
-        //     // rtp_sender.stop().await.unwrap();
-        //     rtp_senders2.write().unwrap().remove(&target);
-        //     // TODO: make sure RTCP task is killed
-        // }
+        let mut remove_targets = vec![];
+        for ((pub_user, track_id), _) in tracks.read().unwrap().iter() {
+            if pub_user == &left_user {
+                info!("remove track for {} {}", pub_user, track_id);
+                remove_targets.push((pub_user.to_string(), track_id.to_string()));
+            }
+        }
+        for target in remove_targets {
+            tracks.write().unwrap().remove(&target);
+            let rtp_sender = {
+                let rtp_senders = rtp_senders.read().unwrap();
+                rtp_senders.get(&target).unwrap().clone()
+            };
+            // remove track from subscriber's PeerConnection
+            // pc.remove_track(&rtp_sender).await.unwrap();
+            // rtp_sender.stop().await.unwrap();
+            rtp_senders.write().unwrap().remove(&target);
+            // TODO: make sure RTCP task is killed
+        }
+
+        // TODO: is this truely remove media info from SDP?
+        for transceiver in pc.get_transceivers().await {
+            if let Some(rtp_sender) = transceiver.sender().await {
+                if let Some(track) = rtp_sender.track().await {
+                    if track.stream_id() == left_user {
+                        transceiver.stop().await.unwrap();
+                    }
+                }
+            }
+        }
+
+        let mut user_media_to_senders = user_media_to_senders.write().unwrap();
+        user_media_to_senders.remove(&(left_user.clone(), "video0".to_string()));
+        user_media_to_senders.remove(&(left_user.clone(), "audio0".to_string()));
     }
 
     async fn spawn_rtp_foward_task(&self) -> Result<()> {
@@ -1066,9 +1088,6 @@ impl SubscriberDetails {
 
         Ok(())
     }
-
-    // fn on_command()
-    // fn on_renegotiation()
 }
 
 
