@@ -35,7 +35,7 @@ use webrtc::data::data_channel::{
 use std::sync::Arc;
 use std::collections::HashMap;
 use std::pin::Pin;
-use tokio::time::Duration;
+use tokio::time::{Duration, timeout};
 use tokio::sync::oneshot;
 use tokio::sync::mpsc;
 use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
@@ -116,6 +116,7 @@ struct PublisherDetails {
     room: String,
     pc: Arc<RTCPeerConnection>,
     nats: nats::asynk::Connection,
+    notify_close: Arc<tokio::sync::Notify>,
 }
 
 impl PublisherDetails {
@@ -274,7 +275,7 @@ impl PublisherDetails {
                 tokio::pin!(timeout);
 
                 tokio::select! {
-                    _ = timeout.as_mut() =>{
+                    _ = timeout.as_mut() => {
                         result = pc.write_rtcp(&PictureLossIndication{
                                 sender_ssrc: 0,
                                 media_ssrc,
@@ -282,6 +283,7 @@ impl PublisherDetails {
                     }
                 };
             }
+            info!("leaving periodic PLI");
         }.instrument(tracing::Span::current()));
     }
 
@@ -297,6 +299,7 @@ impl PublisherDetails {
             while let Ok((n, _)) = track.read(&mut b).await {
                 nats.publish(&subject, &b[..n]).await?;
             }
+            info!("leaving RTP to NATS push: {}", subject);
             Result::<()>::Ok(())
         }.instrument(tracing::Span::current()));
     }
@@ -316,6 +319,7 @@ impl PublisherDetails {
         let span = tracing::Span::current();
         let room = self.room.clone();
         let user = self.user.clone();
+        let notify_close = self.notify_close.clone();
 
         Box::new(move |s: RTCPeerConnectionState| {
             let _enter = span.enter();  // populate user & room info in following logs
@@ -333,6 +337,8 @@ impl PublisherDetails {
 
             if s == RTCPeerConnectionState::Disconnected {
                 // TODO: also remove the media from state
+
+                notify_close.notify_one();
 
                 // tell subscribers a new publisher just leave
                 // ask subscribers to renegotiation
@@ -367,6 +373,8 @@ impl PublisherDetails {
     /// tell subscribers a new publisher just leave
     fn notify_subs_for_leave(room: String, user: String) -> Pin<Box<impl std::future::Future<Output = ()>>> {
         return Box::pin(async move {
+            info!("notify subscribers for publisher leave");
+
             let room = room.clone();   // TODO: avoid this?
             let user = user.clone();   // TODO: avoid this?
 
@@ -395,7 +403,7 @@ impl PublisherDetails {
                 // TODO: special enum for all the cases
                 sub.send(format!("PUB_LEFT {}", user)).await;
             }
-        });
+        }.instrument(tracing::Span::current()));
     }
 }
 
@@ -414,7 +422,8 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
         user: user.clone(),
         room: room.clone(),
         pc: peer_connection.clone(),
-        nats: nc.clone()
+        nats: nc.clone(),
+        notify_close: Default::default(),
     };  // TODO: remove clone
 
     publisher.add_transceivers_based_on_sdp(&offer).await?;
@@ -476,11 +485,10 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
 
     // limit a publisher to 3 hours for now
     // after 3 hours, we close the connection
-    //
-    // TODO: a signal to trigger it ealier when PC failed
-    tokio::time::sleep(Duration::from_secs(3 * 60 * 60)).await;
+    let max_time = Duration::from_secs(3 * 60 * 60);
+    timeout(max_time, publisher.notify_close.notified()).await?;
     peer_connection.close().await?;
-    info!("leaving main function");
+    info!("leaving publisher main");
 
     Ok(())
 }
