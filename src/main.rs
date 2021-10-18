@@ -503,6 +503,7 @@ struct SubscriberDetails {
     room: String,
     pc: Arc<RTCPeerConnection>,
     nats: nats::asynk::Connection,
+    notify_close: Arc<tokio::sync::Notify>,
     tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
     user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
     user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
@@ -643,10 +644,11 @@ impl SubscriberDetails {
     fn spawn_rtcp_reader(&self, rtp_sender: Arc<RTCRtpSender>) {
         tokio::spawn(async move {
             let mut rtcp_buf = vec![0u8; 1500];
+            info!("running RTP sender read");
             while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-            info!("sub: leaving RTP sender read");
+            info!("leaving RTP sender read");
             Result::<()>::Ok(())
-        });
+        }.instrument(tracing::Span::current()));
     }
 
     fn register_notify_message(&mut self) {
@@ -673,6 +675,7 @@ impl SubscriberDetails {
 
     fn on_peer_connection_state_change(&self) -> OnPeerConnectionStateChangeHdlrFn {
         let span = tracing::Span::current();
+        let notify_close = self.notify_close.clone();
         Box::new(move |s: RTCPeerConnectionState| {
             let _enter = span.enter();  // populate user & room info in following logs
             info!("PeerConnection State has changed: {}", s);
@@ -680,8 +683,12 @@ impl SubscriberDetails {
                 // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
                 // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
                 // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-                info!("sub: Peer Connection has gone to failed exiting: Done forwarding");
+                info!("Peer Connection has gone to failed exiting: Done forwarding");
                 // TODO: make sure we cleanup related resource
+            }
+
+            if s == RTCPeerConnectionState::Disconnected {
+                notify_close.notify_one();
             }
 
             // if s == RTCPeerConnectionState::Connected {
@@ -787,6 +794,8 @@ impl SubscriberDetails {
                 let mut result = Ok(0);
                 let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
                 while result.is_ok() {
+                    // TODO: make sure we still have timeout even remove the "hello" message
+                    //       so we can close this task when leaving
                     let timeout = tokio::time::sleep(Duration::from_secs(30));
                     tokio::pin!(timeout);
 
@@ -833,6 +842,8 @@ impl SubscriberDetails {
                         }
                     };
                 }
+
+                info!("leaving data channel loop for '{}'-'{}'", dc_label, dc_id);
             }.instrument(span.clone()))
         })
     }
@@ -970,7 +981,7 @@ impl SubscriberDetails {
                     user_media_to_senders.write().unwrap().insert((pub_user.clone(), app_id.to_string()), rtp_sender.clone());
                     let mut rtcp_buf = vec![0u8; 1500];
                     while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-                    info!("sub: leaving RTP sender read");
+                    info!("leaving RTP sender read");
                     Result::<()>::Ok(())
                 }.instrument(tracing::Span::current()));
             }
@@ -1050,6 +1061,7 @@ impl SubscriberDetails {
                     }
                 }
             }
+            info!("leaving NATS to RTP pull: {}", subject);
         });
 
         Ok(())
@@ -1081,6 +1093,7 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
         room: room.clone(),
         nats: nc.clone(),
         pc: peer_connection.clone(),
+        notify_close: Default::default(),
         tracks: Default::default(),
         user_media_to_tracks: Default::default(),
         user_media_to_senders: Default::default(),
@@ -1139,11 +1152,10 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
 
     // limit a subscriber to 3 hours for now
     // after 3 hours, we close the connection
-    //
-    // TODO: a signal to trigger it ealier when PC failed
-    tokio::time::sleep(Duration::from_secs(3 * 60 * 60)).await;
+    let max_time = Duration::from_secs(3 * 60 * 60);
+    timeout(max_time, subscriber.notify_close.notified()).await?;
     peer_connection.close().await?;
-    info!("leaving main function");
+    info!("leaving subscriber main");
 
     Ok(())
 }
