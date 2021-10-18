@@ -19,6 +19,7 @@ use webrtc::peer::peer_connection::{
     OnICEConnectionStateChangeHdlrFn,
     OnPeerConnectionStateChangeHdlrFn,
     OnDataChannelHdlrFn,
+    OnNegotiationNeededHdlrFn,
 };
 use webrtc::peer::configuration::RTCConfiguration;
 use webrtc::peer::ice::ice_connection_state::RTCIceConnectionState;
@@ -698,6 +699,13 @@ impl SubscriberDetails {
         })
     }
 
+    fn on_negotiation_needed(&self) -> OnNegotiationNeededHdlrFn {
+        Box::new(move || {
+            info!("on_negotiation_needed");
+            Box::pin(async {})
+        })
+    }
+
     fn on_data_channel(&mut self) -> OnDataChannelHdlrFn {
         let span = tracing::Span::current();
 
@@ -1139,6 +1147,10 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
     // This will notify you when the peer has connected/disconnected
     peer_connection
         .on_peer_connection_state_change(subscriber.on_peer_connection_state_change())
+        .await;
+
+    peer_connection
+        .on_negotiation_needed(subscriber.on_negotiation_needed())
         .await;
 
     // Set the remote SessionDescription
