@@ -346,7 +346,7 @@ impl PublisherDetails {
             if s == RTCPeerConnectionState::Disconnected {
                 // TODO: also remove the media from state
 
-                notify_close.notify_one();
+                notify_close.notify_waiters();
 
                 // tell subscribers a new publisher just leave
                 // ask subscribers to renegotiation
@@ -703,7 +703,7 @@ impl SubscriberDetails {
             }
 
             if s == RTCPeerConnectionState::Disconnected {
-                notify_close.notify_one();
+                notify_close.notify_waiters();
             }
 
             // if s == RTCPeerConnectionState::Connected {
