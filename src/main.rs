@@ -423,7 +423,7 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
     // NATS
     // TODO: share NATS connection
     info!("connecting NATS");
-    let nc = nats::asynk::connect("localhost").await?;
+    let nc = nats::asynk::connect("localhost").await.context("can't connect to NATS")?;
 
     let peer_connection = Arc::new(PublisherDetails::create_pc().await?);
     let publisher = PublisherDetails {
@@ -1129,7 +1129,7 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
 
     // NATS
     // TODO: share NATS connection
-    let nc = nats::asynk::connect("localhost").await?;
+    let nc = nats::asynk::connect("localhost").await.context("can't connect to NATS")?;
     let peer_connection = Arc::new(SubscriberDetails::create_pc().await?);
 
     let mut subscriber = SubscriberDetails {
