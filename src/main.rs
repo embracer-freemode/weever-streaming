@@ -815,56 +815,55 @@ impl SubscriberDetails {
             Box::pin(async move {
                 let mut result = Ok(0);
                 let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
+                let max_time = Duration::from_secs(30);
+
                 while result.is_ok() {
-                    // TODO: make sure we still have timeout even remove the "hello" message
-                    //       so we can close this task when leaving
-                    let timeout = tokio::time::sleep(Duration::from_secs(30));
-                    tokio::pin!(timeout);
+                    // use a timeout to make sure we have chance to leave the waiting task even it's closed
+                    // TODO: use notify_close directly
+                    let msg = timeout(max_time, notify_message.recv()).await;
+                    if let Ok(msg) = msg {
+                        // we get data before timeout
+                        let media = HACK_STATE.lock().unwrap().rooms.get(&room).unwrap().user_track_to_mime.clone(); // TODO: avoid this?
 
-                    tokio::select! {
-                        msg = notify_message.recv() => {
-                            let media = HACK_STATE.lock().unwrap().rooms.get(&room).unwrap().user_track_to_mime.clone(); // TODO: avoid this?
+                        let msg = msg.unwrap();
 
-                            let videos = media.iter().filter(|(_, mime)| mime.as_str() == "video").count();
-                            let audios = media.iter().filter(|(_, mime)| mime.as_str() == "audio").count();
-                            let msg = msg.unwrap();
+                        if msg.starts_with("PUB_LEFT ") {
+                            let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
+                            Self::on_pub_leave(
+                                left_user.to_string(),
+                                room.clone(),
+                                pc.clone(),
+                                media.clone(),
+                                tracks.clone(),
+                                rtp_senders.clone(),
+                                user_media_to_tracks.clone(),
+                                user_media_to_senders.clone(),
+                            ).await;
 
-                            if msg.starts_with("PUB_LEFT ") {
-                                let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
-                                Self::on_pub_leave(
-                                    left_user.to_string(),
-                                    room.clone(),
-                                    pc.clone(),
-                                    media.clone(),
-                                    tracks.clone(),
-                                    rtp_senders.clone(),
-                                    user_media_to_tracks.clone(),
-                                    user_media_to_senders.clone(),
-                                ).await;
-                            }
+                            result = Self::send_data(dc.clone(), msg).await;
+                            result = Self::send_data_renegotiation(dc.clone(), media).await;
 
-                            if msg.starts_with("PUB_JOIN ") {
-                                let join_user = msg.splitn(2, " ").skip(1).next().unwrap();
-                                Self::on_pub_join(
-                                    room.clone(),
-                                    join_user.to_string(),
-                                    pc.clone(),
-                                    media.clone(),
-                                    tracks.clone(),
-                                    rtp_senders.clone(),
-                                    user_media_to_tracks.clone(),
-                                    user_media_to_senders.clone(),
-                                ).await;
-                            }
+                        } else if msg.starts_with("PUB_JOIN ") {
+                            let join_user = msg.splitn(2, " ").skip(1).next().unwrap();
+                            Self::on_pub_join(
+                                room.clone(),
+                                join_user.to_string(),
+                                pc.clone(),
+                                media.clone(),
+                                tracks.clone(),
+                                rtp_senders.clone(),
+                                user_media_to_tracks.clone(),
+                                user_media_to_senders.clone(),
+                            ).await;
 
-                            dc.send_text(msg).await;
-                            dc.send_text(format!("RENEGOTIATION videos {} audios {}", videos, audios)).await;
-                        },
-                        _ = timeout.as_mut() => {
-                            let message = "hello".to_string();
-                            info!("Sending '{}'", message);
-                            result = dc.send_text(message).await;
+                            result = Self::send_data(dc.clone(), msg).await;
+                            result = Self::send_data_renegotiation(dc.clone(), media).await;
+
+                        } else {
+                            result = Self::send_data(dc.clone(), msg).await;
                         }
+                    } else {
+                        result = Self::send_data(dc.clone(), "PING".to_string()).await;
                     };
                 }
 
@@ -1066,6 +1065,16 @@ impl SubscriberDetails {
         let mut user_media_to_senders = user_media_to_senders.write().unwrap();
         user_media_to_senders.remove(&(left_user.clone(), "video0".to_string()));
         user_media_to_senders.remove(&(left_user.clone(), "audio0".to_string()));
+    }
+
+    async fn send_data(dc: Arc<RTCDataChannel>, msg: String) -> Result<usize, webrtc::Error> {
+        dc.send_text(msg).await
+    }
+
+    async fn send_data_renegotiation(dc: Arc<RTCDataChannel>, media: HashMap<(String, String), String>) -> Result<usize, webrtc::Error> {
+        let videos = media.iter().filter(|(_, mime)| mime.as_str() == "video").count();
+        let audios = media.iter().filter(|(_, mime)| mime.as_str() == "audio").count();
+        dc.send_text(format!("RENEGOTIATION videos {} audios {}", videos, audios)).await
     }
 
     async fn spawn_rtp_foward_task(&self) -> Result<()> {
