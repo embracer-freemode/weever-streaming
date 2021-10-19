@@ -835,17 +835,20 @@ impl SubscriberDetails {
                         let msg = msg.unwrap();
 
                         if msg.starts_with("PUB_LEFT ") {
-                            let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
-                            Self::on_pub_leave(
-                                left_user.to_string(),
-                                room.clone(),
-                                pc.clone(),
-                                media.clone(),
-                                tracks.clone(),
-                                rtp_senders.clone(),
-                                user_media_to_tracks.clone(),
-                                user_media_to_senders.clone(),
-                            ).await;
+                            // NOTE: we don't delete track for now
+                            //       when publisher rejoin, we will replace tracks
+
+                            // let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
+                            // Self::on_pub_leave(
+                            //     left_user.to_string(),
+                            //     room.clone(),
+                            //     pc.clone(),
+                            //     media.clone(),
+                            //     tracks.clone(),
+                            //     rtp_senders.clone(),
+                            //     user_media_to_tracks.clone(),
+                            //     user_media_to_senders.clone(),
+                            // ).await;
 
                             result = Self::send_data(dc.clone(), msg).await;
                             result = Self::send_data_renegotiation(dc.clone(), media).await;

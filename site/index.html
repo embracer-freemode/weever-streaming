@@ -207,7 +207,12 @@ window.runSubscriber = () => {
     if (e.data.startsWith("PUB_JOIN ") == true) {
       const words = e.data.split(" ");
       let id = words[1];
-      // do something
+      div = document.getElementById(`media-${id}`)
+      // we don't delete tracks
+      // when publisher rejoin, we will replace track and show it again
+      if (div != null) {
+        div.hidden = false;
+      }
     }
 
     if (e.data.startsWith("PUB_LEFT ") == true) {
@@ -216,18 +221,17 @@ window.runSubscriber = () => {
       div = document.getElementById(`media-${id}`)
       if (div != null) {
         log(`remove media elements for ${id}`);
-        // remove mode
-        div.remove();
+        // we don't remove track
+        // we hide it, and reuse it when publisher rejoin
+        div.hidden = true;
       }
       id_to_track_events[id].forEach(event => {
           console.log(event);
-          log(`remove track ${event.track.id} kind ${event.track.kind} mid ${event.transceiver.mid}`);
+          // log(`remove track ${event.track.id} kind ${event.track.kind} mid ${event.transceiver.mid}`);
           // sub_pc.removeTrack(event.transceiver.sender);
-          // remove mode
-          event.transceiver.stop();
+          // event.transceiver.stop();
       });
-      // remove mode
-      delete id_to_track_events[id];
+      // delete id_to_track_events[id];
     }
 
     if (e.data.startsWith("RENEGOTIATION ") == true) {
