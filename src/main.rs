@@ -120,6 +120,13 @@ struct PublisherDetails {
     notify_close: Arc<tokio::sync::Notify>,
 }
 
+// for logging only
+impl std::ops::Drop for PublisherDetails {
+    fn drop(&mut self) {
+        info!("dropping PublisherDetails for room {} user {}", self.room, self.user);
+    }
+}
+
 impl PublisherDetails {
     fn get_nats_subect(&self) -> String {
         format!("rtc.{}.{}", self.room, self.user)
@@ -511,6 +518,13 @@ struct SubscriberDetails {
     rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
     notify_sender: Option<mpsc::Sender<String>>,
     notify_receiver: Option<mpsc::Receiver<String>>,
+}
+
+// for logging only
+impl std::ops::Drop for SubscriberDetails {
+    fn drop(&mut self) {
+        info!("dropping SubscriberDetails for room {} user {}", self.room, self.user);
+    }
 }
 
 impl SubscriberDetails {
