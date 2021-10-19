@@ -338,11 +338,6 @@ window.runSubscriber = () => {
     document.getElementById("sub_videos").appendChild(div)
   }
 
-  // Offer to receive 1 video tracks, 1 audio tracks
-  // TODO: dynamically create this
-  sub_pc.addTransceiver("video", {"direction": "recvonly"})
-  sub_pc.addTransceiver("audio", {"direction": "recvonly"})
-
   sub_pc.createOffer()
     .then(offer => {
       sub_pc.setLocalDescription(offer);

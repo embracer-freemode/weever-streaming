@@ -817,6 +817,13 @@ impl SubscriberDetails {
                 let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
                 let max_time = Duration::from_secs(30);
 
+                // ask for renegotiation immediately after datachannel is connected
+                // TODO: detect if there is media?
+                {
+                    let media = HACK_STATE.lock().unwrap().rooms.get(&room).unwrap().user_track_to_mime.clone(); // TODO: avoid this?
+                    result = Self::send_data_renegotiation(dc.clone(), media).await;
+                }
+
                 while result.is_ok() {
                     // use a timeout to make sure we have chance to leave the waiting task even it's closed
                     // TODO: use notify_close directly
@@ -859,6 +866,9 @@ impl SubscriberDetails {
                             result = Self::send_data(dc.clone(), msg).await;
                             result = Self::send_data_renegotiation(dc.clone(), media).await;
 
+                        } else if msg == "RENEGOTIATION" {
+                            // quick hack for triggering renegotiation from frontend
+                            result = Self::send_data_renegotiation(dc.clone(), media).await;
                         } else {
                             result = Self::send_data(dc.clone(), msg).await;
                         }
