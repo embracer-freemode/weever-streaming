@@ -29,7 +29,7 @@ window.createPublisher = () => {
     },
     body: JSON.stringify(params),
   }).then(res => {
-    log("Request complete! ", res);
+    log(`Request complete! URL ${res.url} status ${res.status}`);
     res.text().then(function(answer) {
       log(answer);
     })
@@ -69,7 +69,7 @@ window.createSubscriber = () => {
     },
     body: JSON.stringify(params),
   }).then(res => {
-    log("Request complete! ", res);
+    log(`Request complete! URL ${res.url} status ${res.status}`);
     res.text().then(function(answer) {
       log(answer);
     })
@@ -130,7 +130,7 @@ window.runPublisher = () => {
             },
             body: offer.sdp,
           }).then(res => {
-            log("Request complete! ", res);
+            log(`Request complete! URL ${res.url} status ${res.status}`);
             res.text().then(function(answer) {
               document.getElementById("pubRemoteSessionDescription").value = answer;
               pub_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
@@ -363,7 +363,7 @@ window.runSubscriber = () => {
         },
         body: offer.sdp,
       }).then(res => {
-        log("Request complete! response:", res);
+        log(`Request complete! URL ${res.url} status ${res.status}`);
         res.text().then(function(answer) {
           document.getElementById("subRemoteSessionDescription").value = answer;
           sub_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
