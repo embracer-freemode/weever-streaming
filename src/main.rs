@@ -94,7 +94,7 @@ struct Room {
     sub_peers: HashMap<String, PeerConnetionInfo>,
     /// user -> token
     pub_tokens: HashMap<String, String>,
-    sub_token: String,
+    sub_tokens: HashMap<String, String>,
 }
 
 #[derive(Debug, Default)]
@@ -1240,21 +1240,15 @@ async fn web_main() -> std::io::Result<()> {
                 // enable logger
                 .wrap(actix_web::middleware::Logger::default())
                 .service(Files::new("/static", "site").prefer_utf8(true))   // demo site
-                .service(create_room)
                 .service(create_pub)
+                .service(create_sub)
                 .service(publish)
-                .service(subscribe_all)
+                .service(subscribe)
                 .service(list)
         )
         .bind("127.0.0.1:8080")?
         .run()
         .await
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct CreateRoomParams {
-    room: String,
-    token: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1264,17 +1258,11 @@ struct CreatePubParams {
     token: Option<String>,
 }
 
-
-#[post("/create/room")]
-async fn create_room(params: web::Json<CreateRoomParams>) -> impl Responder {
-    // TODO: save to cache that shared across instances
-    info!("create room: {:?}", params);
-    if let Some(token) = params.token.clone() {
-        let mut state = HACK_STATE.lock().unwrap();
-        let mut room = state.rooms.entry(params.room.clone()).or_default();
-        room.sub_token = token;
-    }
-    "room set"
+#[derive(Debug, Serialize, Deserialize)]
+struct CreateSubParams {
+    room: String,
+    id: String,
+    token: Option<String>,
 }
 
 
@@ -1289,6 +1277,20 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
         *pub_token = token;
     }
     "pub set"
+}
+
+
+#[post("/create/sub")]
+async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
+    // TODO: save to cache that shared across instances
+    info!("create sub: {:?}", params);
+    if let Some(token) = params.token.clone() {
+        let mut state = HACK_STATE.lock().unwrap();
+        let mut room = state.rooms.entry(params.room.clone()).or_default();
+        let sub_token = room.sub_tokens.entry(params.id.clone()).or_default();
+        *sub_token = token;
+    }
+    "sub set"
 }
 
 
@@ -1307,11 +1309,13 @@ async fn publish(auth: BearerAuth,
         let mut state = HACK_STATE.lock().unwrap();
         let room = state.rooms.entry(room.clone()).or_default();
         let token = room.pub_tokens.get(&id);
-        // if let Some(token) = token {
-        //     if token != auth.token() {
-        //         return HttpResponse::Unauthorized().body("bad token");
-        //     }
-        // }
+        if let Some(token) = token {
+            if token != auth.token() {
+                return HttpResponse::Unauthorized().body("bad token");
+            }
+        } else {
+            return HttpResponse::Unauthorized().body("bad token");
+        }
     }
 
     let sdp = String::from_utf8(sdp.to_vec()).unwrap(); // FIXME: no unwrap
@@ -1335,21 +1339,25 @@ async fn publish(auth: BearerAuth,
 }
 
 #[post("/sub/{room}/{id}")]
-async fn subscribe_all(auth: BearerAuth,
-                       path: web::Path<(String, String)>,
-                       sdp: web::Bytes) -> impl Responder {
+async fn subscribe(auth: BearerAuth,
+                   path: web::Path<(String, String)>,
+                   sdp: web::Bytes) -> impl Responder {
     let (room, id) = path.into_inner();
 
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
-    // TODO: per user token?
     {
         let mut state = HACK_STATE.lock().unwrap();
         let room = state.rooms.entry(room.clone()).or_default();
-        // if room.sub_token != auth.token() {
-        //     return HttpResponse::Unauthorized().body("bad token");
-        // }
+        let token = room.sub_tokens.get(&id);
+        if let Some(token) = token {
+            if token != auth.token() {
+                return HttpResponse::Unauthorized().body("bad token");
+            }
+        } else {
+            return HttpResponse::Unauthorized().body("bad token");
+        }
     }
 
     let sdp = String::from_utf8(sdp.to_vec()).unwrap(); // FIXME: no unwrap
