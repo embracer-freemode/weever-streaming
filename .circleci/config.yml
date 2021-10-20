@@ -1,0 +1,141 @@
+version: 2.1
+
+staging_build_branch: &staging_build_branch develop
+
+prod_build_branch: &prod_build_branch master
+
+
+jobs:
+  test:
+    docker:
+      - image: cimg/rust:1.55.0
+
+    working_directory: ~/repo
+    steps:
+      - checkout
+      - run: rustc --version; cargo --version; rustup --version
+      - restore_cache:
+          keys:
+            - v1-cargo-cache-{{ arch }}-{{ checksum "Cargo.lock" }}
+      - run:
+          name: Build all targets
+          command: cargo build
+      - save_cache:
+          paths:
+            - /usr/local/cargo/registry
+            - target/debug/.fingerprint
+            - target/debug/build
+            - target/debug/deps
+          key: v1-cargo-cache-{{ arch }}-{{ checksum "Cargo.lock" }}
+      - run:
+          name: Run all tests
+          command: cargo test
+      # - run:
+      #     name: Help messages
+      #     command: cargo run --bin webrtc-sfu -- --help
+
+
+  lint:
+    docker:
+      - image: cimg/rust:1.55.0
+    steps:
+      - checkout
+      - run:
+          name: Version information
+          command: rustc --version; cargo --version; rustup --version
+      - run:
+          name: Install Clippy
+          command: rustup component add clippy
+      - run:
+          name: Linting
+          command: cargo clippy
+
+
+  security:
+    docker:
+      - image: cimg/rust:1.55.0
+    steps:
+      - checkout
+      - run:
+          name: Version information
+          command: rustc --version; cargo --version; rustup --version
+      - restore_cache:
+          keys:
+            - v1-cargo-audit-{{ arch }}-0.15.2
+      - run:
+          name: Install dependency auditing tool
+          command: cargo install cargo-audit --version 0.15.2 --features vendored-openssl
+      - save_cache:
+          paths:
+            - /usr/local/cargo
+          key: v1-cargo-audit-{{ arch }}-0.15.2
+      - run:
+          name: Check for known security issues in dependencies
+          command: cargo audit
+
+
+  build-and-push-image-to-staging:
+      machine: true
+      steps:
+        - checkout
+        - run: echo ${GOOGLE_AUTH_STAGING} > ${HOME}/gcp-key.json
+        - add_ssh_keys:
+            fingerprints:
+              - "5c:00:91:1e:ce:d9:d6:e9:79:eb:21:d7:9a:49:ae:18"
+        - run: docker build . --rm=false -t gcr.io/qonver/ailabs_webrtc_sfu:$(echo $CIRCLE_BRANCH | cut -c -10)-$(echo $CIRCLE_SHA1 | cut -c -7)-$(echo $CIRCLE_WORKFLOW_ID | cut -c -7)
+                  --build-arg COMMIT_SHA=${CIRCLE_SHA1}
+        - run: gcloud auth activate-service-account --key-file ${HOME}/gcp-key.json
+        - run: gcloud --quiet config set project qonver
+        - run: gcloud docker -- push gcr.io/qonver/ailabs_webrtc_sfu:$(echo $CIRCLE_BRANCH | cut -c -10)-$(echo $CIRCLE_SHA1 | cut -c -7)-$(echo $CIRCLE_WORKFLOW_ID | cut -c -7)
+        - run: docker tag gcr.io/qonver/ailabs_webrtc_sfu:$(echo $CIRCLE_BRANCH | cut -c -10)-$(echo $CIRCLE_SHA1 | cut -c -7)-$(echo $CIRCLE_WORKFLOW_ID | cut -c -7) gcr.io/qonver/ailabs_webrtc_sfu:ci-latest
+        - run: gcloud docker -- push gcr.io/qonver/ailabs_webrtc_sfu:ci-latest
+
+
+  build-and-push-image-to-production:
+      machine: true
+      steps:
+        - checkout
+        - run: echo ${GOOGLE_AUTH_PROD} > ${HOME}/gcp-key.json
+        - add_ssh_keys:
+            fingerprints:
+              - "5c:00:91:1e:ce:d9:d6:e9:79:eb:21:d7:9a:49:ae:18"
+        - run: docker build . --rm=false -t gcr.io/weever-301020/ailabs_webrtc_sfu:$(echo $CIRCLE_BRANCH | cut -c -10)-$(echo $CIRCLE_SHA1 | cut -c -7)-$(echo $CIRCLE_WORKFLOW_ID | cut -c -7)
+                  --build-arg COMMIT_SHA=${CIRCLE_SHA1}
+        - run: gcloud auth activate-service-account --key-file ${HOME}/gcp-key.json
+        - run: gcloud --quiet config set project weever-301020
+        - run: gcloud docker -- push gcr.io/weever-301020/ailabs_webrtc_sfu:$(echo $CIRCLE_BRANCH | cut -c -10)-$(echo $CIRCLE_SHA1 | cut -c -7)-$(echo $CIRCLE_WORKFLOW_ID | cut -c -7)
+
+
+workflows:
+  version: 2
+  test-and-build-image:
+    jobs:
+      - test
+      - lint
+      - security
+      # disable auto deploy for now:
+      # - deploy-staging:
+      #     context:
+      #       - HELM_SECRET
+      #       - STAGING_DEPLOYMENT
+      #     filters:
+      #       branches:
+      #         only: *staging_build_branch
+      #     requires:
+      #       - build-and-push-image-to-staging
+      - build-and-push-image-to-staging:
+          context:
+            - STAGING_DEPLOYMENT
+          # filters:
+          #   branches:
+          #     only: *staging_build_branch
+          requires:
+            - test
+      - build-and-push-image-to-production:
+          context:
+            - PRODUCTION_DEPLOYMENT
+          filters:
+            branches:
+              only: *prod_build_branch
+          requires:
+            - test
