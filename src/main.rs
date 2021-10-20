@@ -1004,15 +1004,16 @@ impl SubscriberDetails {
                 let rtp_senders = rtp_senders.clone();
                 let user_media_to_senders = user_media_to_senders.clone();
 
+                // NOTE: make sure the track is added before leaving this function
+                let rtp_sender = pc
+                    .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
+                    .await.unwrap();
+
                 // Read incoming RTCP packets
                 // Before these packets are returned they are processed by interceptors. For things
                 // like NACK this needs to be called.
                 tokio::spawn(async move {
                     info!("create new rtp sender for {} {}", pub_user, track_id);
-                    let rtp_sender = pc
-                        .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
-                        .await?;
-
                     rtp_senders.write().unwrap().insert((pub_user.clone(), track_id.clone()), rtp_sender.clone());
                     user_media_to_senders.write().unwrap().insert((pub_user.clone(), app_id.to_string()), rtp_sender.clone());
                     let mut rtcp_buf = vec![0u8; 1500];
