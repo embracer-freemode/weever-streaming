@@ -2,12 +2,45 @@ Horizontal Scaling WebRTC SFU
 ========================================
 
 
+
+Roadmap
+========================================
+
+* [X] audio codec: Opus
+* [X] video codec: VP8
+* [X] RTP BUNDLE
+* [X] RTCP mux
+* [X] Multistream (1 connnetion for multiple video/audio streams)
+* [X] Datachannel
+* [X] WebRTC Renegotiation
+* [X] case: new publisher join, subscriber can get new streams
+* [X] case: publisher leave, subscriber can know and delete stuffs
+* [X] case: subscriber join in the middle, can get existing publishers' streams
+* [ ] case: publisher leave and rejoin again
+
+
+
 WebRTC specs
 ========================================
 
 * [RTCWEB working group](https://datatracker.ietf.org/wg/rtcweb/about/)
-* [WebRTC 1.0: Real-Time Communication Between Browsers](https://www.w3.org/TR/webrtc/)
-* [WebRTC Next Version Use Cases](https://www.w3.org/TR/webrtc-nv-use-cases/)
+* [Web Real-Time Communications Working Group Charter](https://w3c.github.io/webrtc-charter/webrtc-charter.html)
+* [W3C - WebRTC 1.0: Real-Time Communication Between Browsers](https://www.w3.org/TR/webrtc/)
+* [W3C - WebRTC Next Version Use Cases](https://www.w3.org/TR/webrtc-nv-use-cases/)
+* [W3C - Scalable Video Coding (SVC) Extension for WebRTC](https://www.w3.org/TR/webrtc-svc/)
+* [W3C - Screen Capture](https://www.w3.org/TR/screen-capture/)
+* [W3C - MediaStreamTrack Content Hints](https://www.w3.org/TR/mst-content-hint/)
+* [W3C - Viewport Capture](https://w3c.github.io/mediacapture-viewport/)
+* [W3C - WebRTC Encoded Transform](https://w3c.github.io/webrtc-encoded-transform/)
+* [W3C - Media Capture and Streams Extensions](https://w3c.github.io/mediacapture-extensions/)
+* [W3C - Identifiers for WebRTC's Statistics API](https://www.w3.org/TR/webrtc-stats/)
+* [W3C - Identity for WebRTC 1.0](https://www.w3.org/TR/webrtc-identity/)
+* [W3C - Audio Output Devices API](https://www.w3.org/TR/audio-output/)
+* [W3C - Media Capture from DOM Elements](https://www.w3.org/TR/mediacapture-fromelement/)
+* [W3C - MediaStream Recording](https://www.w3.org/TR/mediastream-recording/)
+* [W3C - WebRTC Priority Control API](https://www.w3.org/TR/webrtc-priority/)
+* [W3C - IceTransport Extensions for WebRTC](https://w3c.github.io/webrtc-ice/)
+* [W3C - WebRTC 1.0 Interoperability Tests Results](https://w3c.github.io/webrtc-interop-reports/webrtc-pc-report.html)
 * [RFC 7478 - Web Real-Time Communication Use Cases and Requirements](https://datatracker.ietf.org/doc/rfc7478/)
 * [RFC 7742 - WebRTC Video Processing and Codec Requirements](https://datatracker.ietf.org/doc/rfc7742/)
 * [RFC 7874 - WebRTC Audio Codec and Processing Requirements](https://datatracker.ietf.org/doc/rfc7874/)
@@ -36,20 +69,3 @@ WebRTC specs
     - Trickle ICE and ICE restart via HTTP PATCH and SDP fragments
     - [WHIP and Janus @ IIT-RTC 2021](https://www.slideshare.net/LorenzoMiniero/whip-and-janus-iitrtc-2021)
     - [WISH (WebRTC Ingest Signaling over HTTPS) working group](https://datatracker.ietf.org/wg/wish/about/)
-
-
-
-Features
-========================================
-
-* [X] audio codec: Opus
-* [X] video codec: VP8
-* [X] RTP BUNDLE
-* [X] RTCP mux
-* [X] Multistream (1 connnetion for multiple video/audio streams)
-* [X] Datachannel
-* [X] WebRTC Renegotiation
-* [X] case: new publisher join, subscriber can get new streams
-* [X] case: publisher leave, subscriber can know and delete stuffs
-* [X] case: subscriber join in the middle, can get existing publishers' streams
-* [ ] case: publisher leave and rejoin again

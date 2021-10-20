@@ -1,6 +1,6 @@
 //! WebRTC SFU with horizontal scale design
 
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, bail};
 use log::{debug, info, warn, error};
 use interceptor::registry::Registry;
 use rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
@@ -41,12 +41,14 @@ use tokio::sync::oneshot;
 use tokio::sync::mpsc;
 use actix_web::{post, web, App, HttpServer, Responder, HttpResponse};
 use actix_web_httpauth::extractors::bearer::BearerAuth;
-// use actix_cors::Cors;
 use actix_files::Files;
 use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 use tracing::{Instrument, info_span};
+// use rustls::server::{NoClientAuth, ServerConfig};    // v0.20.0
+use rustls::{NoClientAuth, ServerConfig};
+use rustls_pemfile::{certs, pkcs8_private_keys};
 use std::sync::Mutex;
 use std::sync::RwLock;
 
@@ -75,7 +77,7 @@ fn main() -> Result<()> {
     // set our logger as global default
     tracing::subscriber::set_global_default(subscriber).context("Unable to set global collector")?;
 
-    web_main()?;
+    web_main(args)?;
 
     Ok(())
 }
@@ -1247,10 +1249,33 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
 
 /// Web server for communicating with web clients
 #[actix_web::main]
-async fn web_main() -> std::io::Result<()> {
+async fn web_main(cli: cli::CliOptions) -> Result<()> {
+    // load ssl keys
+    let raw_certs = &mut std::io::BufReader::new(std::fs::File::open(cli.cert_file).unwrap());
+    let raw_keys = &mut std::io::BufReader::new(std::fs::File::open(cli.key_file).unwrap());
+    let cert_chain = certs(raw_certs)
+        .context("cert parse error")?
+        .iter()
+        .map(|v| rustls::Certificate(v.to_vec()))
+        .collect();
+    let mut keys = pkcs8_private_keys(raw_keys).context("ssl key parse error")?;
+    if keys.is_empty() {
+        bail!("SSL key (PKCS) is emtpy");
+    }
+    let key = rustls::PrivateKey(keys.remove(0));
+
+    // new ver:
+    // let config = ServerConfig::builder()
+    //     .with_safe_defaults()
+    //     .with_no_client_auth()
+    //     .with_single_cert(cert_chain, key)
+    //     .context("cert setup failed")?;
+
+    let mut config = ServerConfig::new(NoClientAuth::new());
+    config.set_single_cert(cert_chain, key).unwrap();
+
     HttpServer::new(||
             App::new()
-                // .wrap(Cors::default())
                 // enable logger
                 .wrap(actix_web::middleware::Logger::default())
                 .service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
@@ -1259,9 +1284,10 @@ async fn web_main() -> std::io::Result<()> {
                 .service(publish)
                 .service(subscribe)
         )
-        .bind("0.0.0.0:8080")?
+        .bind_rustls("0.0.0.0:8443", config)?
         .run()
         .await
+        .context("actix web server error")
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1347,7 +1373,7 @@ async fn publish(auth: BearerAuth,
     debug!("SDP answer: {:.20}", sdp_answer);
     HttpResponse::Created() // 201
         .content_type("application/sdp")
-        .append_header(("Location", ""))    // TODO: what's the need?
+        // .append_header(("Location", ""))    // TODO: what's the need?
         .body(sdp_answer)
 }
 
