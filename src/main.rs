@@ -821,7 +821,7 @@ impl SubscriberDetails {
                 // TODO: detect if there is media?
                 {
                     let media = HACK_STATE.lock().unwrap().rooms.get(&room).unwrap().user_track_to_mime.clone(); // TODO: avoid this?
-                    result = Self::send_data_renegotiation(dc.clone(), media).await;
+                    result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
                 }
 
                 while result.is_ok() {
@@ -851,7 +851,7 @@ impl SubscriberDetails {
                             // ).await;
 
                             result = Self::send_data(dc.clone(), msg).await;
-                            result = Self::send_data_renegotiation(dc.clone(), media).await;
+                            result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
 
                         } else if msg.starts_with("PUB_JOIN ") {
                             let join_user = msg.splitn(2, " ").skip(1).next().unwrap();
@@ -867,11 +867,11 @@ impl SubscriberDetails {
                             ).await;
 
                             result = Self::send_data(dc.clone(), msg).await;
-                            result = Self::send_data_renegotiation(dc.clone(), media).await;
+                            result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
 
                         } else if msg == "RENEGOTIATION" {
                             // quick hack for triggering renegotiation from frontend
-                            result = Self::send_data_renegotiation(dc.clone(), media).await;
+                            result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
                         } else {
                             result = Self::send_data(dc.clone(), msg).await;
                         }
@@ -1075,18 +1075,34 @@ impl SubscriberDetails {
             }
         }
 
+        // {
         let mut user_media_to_senders = user_media_to_senders.write().unwrap();
         user_media_to_senders.remove(&(left_user.clone(), "video0".to_string()));
         user_media_to_senders.remove(&(left_user.clone(), "audio0".to_string()));
+        // }
+
+        // // debug: pc status
+        // for t in pc.get_transceivers().await {
+        //     info!("t: mid {} kind {}", t.mid().await, t.kind());
+        //     if let Some(rtp_sender) = t.sender().await {
+        //         info!("t: mid {} kind {}: sender {:?}",
+        //               t.mid().await, t.kind(), rtp_sender.get_parameters().await.rtp_parameters);
+        //     }
+        //     if let Some(rtp_receiver) = t.receiver().await {
+        //         info!("t: mid {} kind {}: receiver {:?}",
+        //               t.mid().await, t.kind(), rtp_receiver.kind());
+        //     }
+        // }
     }
 
     async fn send_data(dc: Arc<RTCDataChannel>, msg: String) -> Result<usize, webrtc::Error> {
         dc.send_text(msg).await
     }
 
-    async fn send_data_renegotiation(dc: Arc<RTCDataChannel>, media: HashMap<(String, String), String>) -> Result<usize, webrtc::Error> {
-        let videos = media.iter().filter(|(_, mime)| mime.as_str() == "video").count();
-        let audios = media.iter().filter(|(_, mime)| mime.as_str() == "audio").count();
+    async fn send_data_renegotiation(dc: Arc<RTCDataChannel>, pc: Arc<RTCPeerConnection>) -> Result<usize, webrtc::Error> {
+        let transceiver = pc.get_receivers().await;
+        let videos = transceiver.iter().filter(|t| t.kind() == RTPCodecType::Video).count();
+        let audios = transceiver.iter().filter(|t| t.kind() == RTPCodecType::Audio).count();
         dc.send_text(format!("RENEGOTIATION videos {} audios {}", videos, audios)).await
     }
 
