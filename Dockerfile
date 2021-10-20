@@ -26,6 +26,7 @@ FROM debian:bullseye-20211011-slim
 ARG TRIPLE=x86_64-unknown-linux-gnu
 ARG PROJ=webrtc-sfu
 COPY --from=builder /target/${TRIPLE}/release/${PROJ} .
+COPY site site
 
 # log current git commit hash for future investigation (need to pass in from outside)
 ARG COMMIT_SHA
