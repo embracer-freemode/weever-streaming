@@ -39,7 +39,7 @@ use std::pin::Pin;
 use tokio::time::{Duration, timeout};
 use tokio::sync::oneshot;
 use tokio::sync::mpsc;
-use actix_web::{get, post, web, App, HttpServer, Responder, HttpResponse};
+use actix_web::{post, web, App, HttpServer, Responder, HttpResponse};
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 // use actix_cors::Cors;
 use actix_files::Files;
@@ -409,7 +409,7 @@ impl PublisherDetails {
             };
             for sub in subs {
                 // TODO: special enum for all the cases
-                sub.send(format!("PUB_LEFT {}", user)).await;
+                sub.send(format!("PUB_LEFT {}", user)).await.unwrap();
             }
         }.instrument(tracing::Span::current()));
     }
@@ -819,10 +819,7 @@ impl SubscriberDetails {
 
                 // ask for renegotiation immediately after datachannel is connected
                 // TODO: detect if there is media?
-                {
-                    let media = HACK_STATE.lock().unwrap().rooms.get(&room).unwrap().user_track_to_mime.clone(); // TODO: avoid this?
-                    result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
-                }
+                result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
 
                 while result.is_ok() {
                     // use a timeout to make sure we have chance to leave the waiting task even it's closed
@@ -850,7 +847,7 @@ impl SubscriberDetails {
                             //     user_media_to_senders.clone(),
                             // ).await;
 
-                            result = Self::send_data(dc.clone(), msg).await;
+                            Self::send_data(dc.clone(), msg).await.unwrap();
                             result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
 
                         } else if msg.starts_with("PUB_JOIN ") {
@@ -866,7 +863,7 @@ impl SubscriberDetails {
                                 user_media_to_senders.clone(),
                             ).await;
 
-                            result = Self::send_data(dc.clone(), msg).await;
+                            Self::send_data(dc.clone(), msg).await.unwrap();
                             result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
 
                         } else if msg == "RENEGOTIATION" {
@@ -912,7 +909,7 @@ impl SubscriberDetails {
                     pc.set_local_description(answer.clone()).await.unwrap();
                     if let Some(answer) = pc.local_description().await {
                         info!("sent new SDP answer");
-                        dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await;
+                        dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await.unwrap();
                     }
                 }.instrument(span.clone()));
             }
@@ -921,7 +918,7 @@ impl SubscriberDetails {
             if msg_str.starts_with("RENEGOTIATION") {
                 let notify_sender = notify_sender.clone();
                 return Box::pin(async move {
-                    notify_sender.send("RENEGOTIATION".to_string()).await;
+                    notify_sender.send("RENEGOTIATION".to_string()).await.unwrap();
                 });
             }
 
@@ -1255,12 +1252,11 @@ async fn web_main() -> std::io::Result<()> {
                 // .wrap(Cors::default())
                 // enable logger
                 .wrap(actix_web::middleware::Logger::default())
-                .service(Files::new("/static", "site").prefer_utf8(true))   // demo site
+                .service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
                 .service(create_pub)
                 .service(create_sub)
                 .service(publish)
                 .service(subscribe)
-                .service(list)
         )
         .bind("127.0.0.1:8080")?
         .run()
@@ -1302,7 +1298,7 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
     info!("create sub: {:?}", params);
     if let Some(token) = params.token.clone() {
         let mut state = HACK_STATE.lock().unwrap();
-        let mut room = state.rooms.entry(params.room.clone()).or_default();
+        let room = state.rooms.entry(params.room.clone()).or_default();
         let sub_token = room.sub_tokens.entry(params.id.clone()).or_default();
         *sub_token = token;
     }
@@ -1393,15 +1389,4 @@ async fn subscribe(auth: BearerAuth,
     HttpResponse::Created() // 201
         .content_type("application/sdp")
         .body(sdp_answer)
-}
-
-#[post("/info/{room}/list")]
-async fn list(auth: BearerAuth,
-              path: web::Path<String>) -> impl Responder {
-    let room = path.into_inner();
-    // TODO: token verification
-    // auth.token().to_string()
-    // return participants
-    unimplemented!();
-    ""
 }
