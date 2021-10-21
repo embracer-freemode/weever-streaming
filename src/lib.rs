@@ -52,8 +52,14 @@ use rustls_pemfile::{certs, pkcs8_private_keys};
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+mod cli;
+
 
 fn main() -> Result<()> {
+    // CLI
+    let args = cli::get_args();
+    debug!("CLI args: {:?}", args);
+
     // logger
     // bridge "log" crate and "tracing" crate
     tracing_log::LogTracer::init()?;
