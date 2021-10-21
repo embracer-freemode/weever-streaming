@@ -46,8 +46,7 @@ use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 use tracing::{Instrument, info_span};
-// use rustls::server::{NoClientAuth, ServerConfig};    // v0.20.0
-use rustls::{NoClientAuth, ServerConfig};
+use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use std::sync::Mutex;
 use std::sync::RwLock;
@@ -1269,16 +1268,11 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
         bail!("SSL key (PKCS) is emtpy");
     }
     let key = rustls::PrivateKey(keys.remove(0));
-
-    // new ver:
-    // let config = ServerConfig::builder()
-    //     .with_safe_defaults()
-    //     .with_no_client_auth()
-    //     .with_single_cert(cert_chain, key)
-    //     .context("cert setup failed")?;
-
-    let mut config = ServerConfig::new(NoClientAuth::new());
-    config.set_single_cert(cert_chain, key).unwrap();
+    let config = ServerConfig::builder()
+        .with_safe_defaults()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, key)
+        .context("cert setup failed")?;
 
     HttpServer::new(||
             App::new()
@@ -1290,7 +1284,7 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .service(publish)
                 .service(subscribe)
         )
-        .bind_rustls("0.0.0.0:8443", config)?
+        .bind_rustls(format!("{}:{}", cli.host, cli.port), config)?
         .run()
         .await
         .context("actix web server error")
@@ -1379,7 +1373,7 @@ async fn publish(auth: BearerAuth,
     debug!("SDP answer: {:.20}", sdp_answer);
     HttpResponse::Created() // 201
         .content_type("application/sdp")
-        // .append_header(("Location", ""))    // TODO: what's the need?
+        .append_header(("Location", ""))    // TODO: what's the need?
         .body(sdp_answer)
 }
 

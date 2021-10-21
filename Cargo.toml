@@ -31,10 +31,8 @@ tracing-appender = "0.1.2"
 tracing-log = "0.1.2"
 tracing-subscriber = "0.2.25"
 # web server
-# TODO: actix 4 upgrade
-# TODO: rustls 0.20 upgrade
-actix-web = { version = "3.3.2", features = ["rustls"] } # web framework
-actix-web-httpauth = "0.5.1"    # bearerer token
-actix-files = "0.5.0"           # static files
-rustls = "0.18.1"               # SSL
+actix-web = { version = "4.0.0-beta.10", features = ["rustls"] } # web framework
+actix-web-httpauth = { git = "https://github.com/wdv4758h/actix-extras", rev = "e0bc6aa" }   # bearerer token
+actix-files = "0.6.0-beta.8"    # static files
+rustls = "0.20.0"               # SSL
 rustls-pemfile = "0.2.1"        # SSL

@@ -7,10 +7,18 @@ use clap::Parser;
 #[derive(Clone, Debug)]
 #[derive(Parser)]
 pub struct CliOptions {
+    /// Web server host
+    #[clap(short, long, env, default_value = "0.0.0.0")]
+    pub host: String,
+
+    /// Web server port
+    #[clap(short, long, env, default_value = "8443")]
+    pub port: String,
+
     /// NATS server URL
     #[clap(short, long, env, default_value = "localhost")]
     pub nats: String,
-    ///
+
     /// STUN server URL
     #[clap(long, env, default_value = "stun://stun.l.google.com:19302")]
     pub stun: String,
