@@ -230,7 +230,7 @@ dependencies = [
 [[package]]
 name = "actix-web-httpauth"
 version = "0.6.0-beta.2"
-source = "git+https://github.com/wdv4758h/actix-extras?rev=e0bc6aa#e0bc6aab89342087b3ac14ae14568ecfbd8d5834"
+source = "git+https://github.com/wdv4758h/actix-extras?rev=a3cc228#a3cc228c2f5a7271061e80a267c896917416131a"
 dependencies = [
  "actix-service",
  "actix-web",
