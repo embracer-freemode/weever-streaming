@@ -139,7 +139,10 @@ impl PublisherDetails {
         format!("rtc.{}.{}", self.room, self.user)
     }
 
-    async fn create_pc() -> Result<RTCPeerConnection, webrtc::Error> {
+    async fn create_pc(stun: String,
+                       turn: Option<String>,
+                       turn_username: Option<String>,
+                       turn_password: Option<String>) -> Result<RTCPeerConnection, webrtc::Error> {
         // Create a MediaEngine object to configure the supported codec
         info!("creating MediaEngine");
         let mut m = MediaEngine::default();
@@ -193,11 +196,28 @@ impl PublisherDetails {
 
         // Prepare the configuration
         info!("preparing RTCConfiguration");
-        let config = RTCConfiguration {
-            ice_servers: vec![RTCIceServer {
-                urls: vec!["stun:stun.l.google.com:19302".to_owned()],
+        let mut servers = vec![];
+        servers.push(
+            RTCIceServer {
+                // e.g.: stun:stun.l.google.com:19302
+                urls: vec![stun],
                 ..Default::default()
-            }],
+            }
+        );
+        if let Some(turn) = turn {
+            let username = turn_username.unwrap();
+            let password = turn_password.unwrap();
+            servers.push(
+                RTCIceServer {
+                    urls: vec![turn],
+                    username,
+                    credential: password,
+                    ..Default::default()
+                }
+            );
+        }
+        let config = RTCConfiguration {
+            ice_servers: servers,
             ..Default::default()
         };
 
@@ -425,14 +445,19 @@ impl PublisherDetails {
 /// Extract RTP streams from WebRTC, and send it to NATS
 ///
 /// based on [rtp-forwarder](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-forwarder) example
-#[tracing::instrument(name = "pub", skip(offer, answer_tx), level = "info")]  // following log will have "pub{room=..., user=...}" in INFO level
-async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, tid: u16) -> Result<()> {
+#[tracing::instrument(name = "pub", skip(cli, offer, answer_tx), level = "info")]  // following log will have "pub{room=..., user=...}" in INFO level
+async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, tid: u16) -> Result<()> {
     // NATS
     // TODO: share NATS connection
     info!("connecting NATS");
     let nc = nats::asynk::connect("localhost").await.context("can't connect to NATS")?;
 
-    let peer_connection = Arc::new(PublisherDetails::create_pc().await?);
+    let peer_connection = Arc::new(PublisherDetails::create_pc(
+            cli.stun,
+            cli.turn,
+            cli.turn_username,
+            cli.turn_password,
+    ).await.context("create PeerConnection failed")?);
     let publisher = PublisherDetails {
         user: user.clone(),
         room: room.clone(),
@@ -441,7 +466,7 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
         notify_close: Default::default(),
     };  // TODO: remove clone
 
-    publisher.add_transceivers_based_on_sdp(&offer).await?;
+    publisher.add_transceivers_based_on_sdp(&offer).await.context("add tranceivers based on SDP failed")?;
 
     // build SDP Offer type
     let mut sdp = RTCSessionDescription::default();
@@ -480,7 +505,7 @@ async fn webrtc_to_nats(room: String, user: String, offer: String, answer_tx: on
     let mut gather_complete = peer_connection.gathering_complete_promise().await;
 
     // Sets the LocalDescription, and starts our UDP listeners
-    peer_connection.set_local_description(answer).await?;
+    peer_connection.set_local_description(answer).await.context("set local SDP failed")?;
 
     // Block until ICE Gathering is complete, disabling trickle ICE
     // we do this because we only can exchange one signaling message
@@ -539,7 +564,10 @@ impl SubscriberDetails {
         format!("rtc.{}.*.*", self.room)
     }
 
-    async fn create_pc() -> Result<RTCPeerConnection, webrtc::Error> {
+    async fn create_pc(stun: String,
+                       turn: Option<String>,
+                       turn_username: Option<String>,
+                       turn_password: Option<String>) -> Result<RTCPeerConnection, webrtc::Error> {
         info!("creating MediaEngine");
         // Create a MediaEngine object to configure the supported codec
         let mut m = MediaEngine::default();
@@ -592,11 +620,28 @@ impl SubscriberDetails {
 
         info!("preparing RTCConfiguration");
         // Prepare the configuration
-        let config = RTCConfiguration {
-            ice_servers: vec![RTCIceServer {
-                urls: vec!["stun:stun.l.google.com:19302".to_owned()],
+        let mut servers = vec![];
+        servers.push(
+            RTCIceServer {
+                // e.g.: stun:stun.l.google.com:19302
+                urls: vec![stun],
                 ..Default::default()
-            }],
+            }
+        );
+        if let Some(turn) = turn {
+            let username = turn_username.unwrap();
+            let password = turn_password.unwrap();
+            servers.push(
+                RTCIceServer {
+                    urls: vec![turn],
+                    username,
+                    credential: password,
+                    ..Default::default()
+                }
+            );
+        }
+        let config = RTCConfiguration {
+            ice_servers: servers,
             ..Default::default()
         };
 
@@ -1162,8 +1207,8 @@ impl SubscriberDetails {
 /// Pull RTP streams from NATS, and send it to WebRTC
 ///
 // based on [rtp-to-webrtc](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-to-webrtc)
-#[tracing::instrument(name = "sub", skip(offer, answer_tx), level = "info")]  // following log will have "sub{room=..., user=...}" in INFO level
-async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, tid: u16) -> Result<()> {
+#[tracing::instrument(name = "sub", skip(cli, offer, answer_tx), level = "info")]  // following log will have "sub{room=..., user=...}" in INFO level
+async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, tid: u16) -> Result<()> {
     // build SDP Offer type
     let mut sdp = RTCSessionDescription::default();
     sdp.sdp_type = RTCSdpType::Offer;
@@ -1173,7 +1218,12 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
     // NATS
     // TODO: share NATS connection
     let nc = nats::asynk::connect("localhost").await.context("can't connect to NATS")?;
-    let peer_connection = Arc::new(SubscriberDetails::create_pc().await?);
+    let peer_connection = Arc::new(SubscriberDetails::create_pc(
+            cli.stun,
+            cli.turn,
+            cli.turn_username,
+            cli.turn_password,
+    ).await?);
 
     let mut subscriber = SubscriberDetails {
         user: user.clone(),
@@ -1256,8 +1306,8 @@ async fn nats_to_webrtc(room: String, user: String, offer: String, answer_tx: on
 #[actix_web::main]
 async fn web_main(cli: cli::CliOptions) -> Result<()> {
     // load ssl keys
-    let raw_certs = &mut std::io::BufReader::new(std::fs::File::open(cli.cert_file).unwrap());
-    let raw_keys = &mut std::io::BufReader::new(std::fs::File::open(cli.key_file).unwrap());
+    let raw_certs = &mut std::io::BufReader::new(std::fs::File::open(&cli.cert_file).unwrap());
+    let raw_keys = &mut std::io::BufReader::new(std::fs::File::open(&cli.key_file).unwrap());
     let cert_chain = certs(raw_certs)
         .context("cert parse error")?
         .iter()
@@ -1274,17 +1324,20 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
         .with_single_cert(cert_chain, key)
         .context("cert setup failed")?;
 
-    HttpServer::new(||
+    let url = format!("{}:{}", cli.host, cli.port);
+    HttpServer::new(move || {
+            let data = web::Data::new(cli.clone());
             App::new()
                 // enable logger
                 .wrap(actix_web::middleware::Logger::default())
+                .app_data(data)
                 .service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
                 .service(create_pub)
                 .service(create_sub)
                 .service(publish)
                 .service(subscribe)
-        )
-        .bind_rustls(format!("{}:{}", cli.host, cli.port), config)?
+        })
+        .bind_rustls(url, config)?
         .run()
         .await
         .context("actix web server error")
@@ -1336,6 +1389,7 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
 /// WebRTC WHIP compatible endpoint for publisher
 #[post("/pub/{room}/{id}")]
 async fn publish(auth: BearerAuth,
+                 cli: web::Data<cli::CliOptions>,
                  path: web::Path<(String, String)>,
                  sdp: web::Bytes) -> impl Responder {
                  // web::Json(sdp): web::Json<RTCSessionDescription>) -> impl Responder {
@@ -1367,7 +1421,7 @@ async fn publish(auth: BearerAuth,
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
     let tid = now.wrapping_div(10000) as u16;
 
-    tokio::spawn(webrtc_to_nats(room.clone(), id.clone(), sdp, tx, tid));
+    tokio::spawn(webrtc_to_nats(cli.get_ref().clone(), room.clone(), id.clone(), sdp, tx, tid));
     // TODO: timeout
     let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
     debug!("SDP answer: {:.20}", sdp_answer);
@@ -1379,6 +1433,7 @@ async fn publish(auth: BearerAuth,
 
 #[post("/sub/{room}/{id}")]
 async fn subscribe(auth: BearerAuth,
+                   cli: web::Data<cli::CliOptions>,
                    path: web::Path<(String, String)>,
                    sdp: web::Bytes) -> impl Responder {
     let (room, id) = path.into_inner();
@@ -1409,7 +1464,7 @@ async fn subscribe(auth: BearerAuth,
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
     let tid = now.wrapping_div(10000) as u16;
 
-    tokio::spawn(nats_to_webrtc(room.clone(), id.clone(), sdp, tx, tid));
+    tokio::spawn(nats_to_webrtc(cli.get_ref().clone(), room.clone(), id.clone(), sdp, tx, tid));
     // TODO: timeout
     let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
     debug!("SDP answer: {:.20}", sdp_answer);

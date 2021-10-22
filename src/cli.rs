@@ -20,12 +20,20 @@ pub struct CliOptions {
     pub nats: String,
 
     /// STUN server URL
-    #[clap(long, env, default_value = "stun://stun.l.google.com:19302")]
+    #[clap(long, env, default_value = "stun:stun.l.google.com:19302")]
     pub stun: String,
 
     /// TURN server URL
     #[clap(short, long, env)]
     pub turn: Option<String>,
+
+    /// TURN server username
+    #[clap(long, env)]
+    pub turn_username: Option<String>,
+
+    /// TURN server password
+    #[clap(long, env)]
+    pub turn_password: Option<String>,
 
     /// SSL cert file
     #[clap(long, env, default_value = "cert.pem")]
