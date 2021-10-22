@@ -3,7 +3,7 @@
 use clap::Parser;
 
 
-/// Janus Gateway test client
+/// WebRTC SFU server
 #[derive(Clone, Debug)]
 #[derive(Parser)]
 pub struct CliOptions {
