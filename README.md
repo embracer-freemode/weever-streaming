@@ -1,22 +1,49 @@
 Horizontal Scaling WebRTC SFU
 ========================================
 
+A WebRTC SFU server aim to be horizontal scalable.
+
+You can view the table of content on GitHub like this:
+![github-toc](https://user-images.githubusercontent.com/2716047/132623287-c276e4a0-19a8-44a5-bbdb-41e1cdc432e1.gif)
 
 
-Roadmap
+High Level Idea
 ========================================
 
-* [X] audio codec: Opus
-* [X] video codec: VP8
-* [X] RTP BUNDLE
-* [X] RTCP mux
-* [X] Multistream (1 connnetion for multiple video/audio streams)
-* [X] Datachannel
-* [X] WebRTC Renegotiation
-* [X] case: new publisher join, subscriber can get new streams
-* [X] case: publisher leave, subscriber can know and delete stuffs
-* [X] case: subscriber join in the middle, can get existing publishers' streams
-* [ ] case: publisher leave and rejoin again
+Problem
+------------------------------
+
+The [Janus](https://janus.conf.meetecho.com) server can't easily scale horizontally.
+It needs either manually media forward setup for publishers/subscribers,
+or use it in provision style (prepare big enough resource for an event).
+
+And the room creation management in Janus is not very smooth.
+If the instance is restarted, you need to config the room again.
+There is no builtin way to easily restore the states.
+
+
+Solution
+------------------------------
+
+Options:
+
+1. write custom Janus plugin to meet our goal
+2. survey other media servers to see if they can horizontal scale
+3. write whole WebRTC SFU server by ourself (full control, but need more development)
+
+
+This project picks solution #3.
+We write our own WebRTC SFU server.
+We built the server with horizontal scale in mind.
+
+
+Pros:
+* full control for the media
+* can customize whatever we want
+
+Cons:
+* need more development time
+* need deeper media knowledge
 
 
 
@@ -69,3 +96,282 @@ WebRTC specs
     - Trickle ICE and ICE restart via HTTP PATCH and SDP fragments
     - [WHIP and Janus @ IIT-RTC 2021](https://www.slideshare.net/LorenzoMiniero/whip-and-janus-iitrtc-2021)
     - [WISH (WebRTC Ingest Signaling over HTTPS) working group](https://datatracker.ietf.org/wg/wish/about/)
+
+
+
+Rust Resources
+========================================
+
+Books and Docs:
+
+* [The Rust Programming Language](https://doc.rust-lang.org/book/) (whole book online)
+* [Rust by Example](https://doc.rust-lang.org/rust-by-example/)
+* [The Cargo Book](https://doc.rust-lang.org/cargo/) (the package manager)
+* [Standard Library](https://doc.rust-lang.org/stable/std/index.html)
+* [Docs.rs](https://docs.rs) (API docs for whatever crate published in ecosystem)
+* [crates.io](https://crates.io) (Rust packages center)
+* [rust-analyzer](https://rust-analyzer.github.io) (Language Server Protocol support for the Rust, highly recommended, it provides many info for your editor)
+* [Tokio](https://docs.rs/tokio/latest/) (the async runtime)
+* [Serde](https://serde.rs) (serialize/deserialize framework)
+* [Clap](https://clap.rs) (CLI interface, including env loading)
+* [WebRTC.rs](https://github.com/webrtc-rs/webrtc)
+
+
+Also you can build documentation site via command:
+
+```sh
+cargo doc
+```
+
+Open with your default browser
+
+```sh
+# URL will look like "file:///path/to/project/target/doc/project/index.html"
+cargo doc --open
+```
+
+
+This will have API level overview of what's in the codebase.
+And you will get all the API docs from dependencies.
+
+
+
+How to build project
+========================================
+
+Code checking
+------------------------------
+
+This only perform types checking, lifetime checking, ... etc.
+But it won't ask compiler to generate binary.
+This will be faster than ``cargo build``,
+which suit well for development cycle.
+
+```sh
+cargo check
+```
+
+
+Development build
+------------------------------
+
+```sh
+cargo build
+```
+
+
+Release build
+------------------------------
+
+Release build will take more time than development build.
+
+```sh
+cargo build --release
+```
+
+
+Container build
+------------------------------
+
+Related setup all live in ``Dockerfile``
+
+```sh
+docker build .
+```
+
+
+Run
+========================================
+
+Environment prepare
+------------------------------
+
+Environment dependencies:
+* [NATS server](https://nats.io)
+
+
+Run the program
+------------------------------
+
+Run with default options:
+
+```sh
+cargo run
+```
+
+
+Run with customize options:
+
+```sh
+cargo run -- ...
+```
+
+
+Changing log level:
+
+```sh
+env RUST_LOG=info cargo run -- ...
+```
+
+
+Checking what arguments (and environment variables) can use:
+(if the CLI argument is not present, env variable will be used as fallback)
+
+```sh
+cargo run -- --help
+```
+![cargo-cli](https://user-images.githubusercontent.com/2716047/138387972-14e193b0-cde1-47b6-af20-374cbda5a234.png)
+
+
+
+Testing
+========================================
+
+Doctest
+------------------------------
+
+(TODO: not implmented for this repo right now)
+
+You can write some code samples and assertions in doc comments style.
+Those cases will be discovered and run.
+Here are some [samples](https://doc.rust-lang.org/rust-by-example/testing/doc_testing.html).
+
+
+Unit Test
+------------------------------
+
+(TODO: not implmented for this repo right now)
+
+You can put your test case into the source code file with ``#[cfg(test)]``.
+Those cases will be discovered and run.
+Here are some [samples](https://doc.rust-lang.org/rust-by-example/testing/unit_testing.html).
+
+
+Integration Test
+------------------------------
+
+(TODO: not implmented for this repo right now)
+
+The test cases are in the ``tests`` folder.
+Here are some [samples](https://doc.rust-lang.org/rust-by-example/testing/integration_testing.html).
+
+You can run the testing with this command:
+
+```sh
+cargo test
+```
+
+If you need coverage report, you can install [Tarpaulin](https://github.com/xd009642/tarpaulin).
+Then run:
+
+```sh
+# default is showing coverage report in stdout
+# "-o Html" will generate a HTML file so that you can have more browsing
+cargo tarpaulin -o Html
+```
+
+Go check the ``tarpaulin-report.html``:
+
+![TODO-UPDATE-test-cov1](https://user-images.githubusercontent.com/2716047/128280082-ddf88c95-b1f8-4d2c-8a52-2cf2ad2c6b74.png)
+![TODO-UPDATE-test-cov2](https://user-images.githubusercontent.com/2716047/128280084-46101db4-615b-4133-9289-73ba0b7060ef.png)
+
+
+Fuzz Test
+------------------------------
+
+(TODO: not implmented for this repo right now)
+
+You can add some fuzz testing to uncover some cases that's not included in existing test cases.
+With engine like AFL or LLVM libFuzzer.
+Here is the [guide for fuzz](https://rust-fuzz.github.io/book/introduction.html).
+
+
+
+Benchmark
+========================================
+
+(TODO: not implmented for this repo right now)
+
+It's definitely good idea to write bechmark before you tweak performance.
+There is builtin [cargo bench](https://doc.rust-lang.org/cargo/commands/cargo-bench.html) support.
+If you want more advanced features,
+[Criterion](https://bheisler.github.io/criterion.rs/book/getting_started.html)
+is good one with more charting support.
+
+
+
+How to update dependencies
+========================================
+
+The dependencies are written in ``Cargo.toml``.
+And the ``Cargo.lock`` is the version lock for everthing being used.
+
+If you want to see if there is new version in ecosystem,
+you can run:
+
+```
+cargo update --dry-run
+```
+
+
+
+CI (Continuous Integration)
+========================================
+
+Currently, we are using CircleCI.
+The config is at ``.circleci/config.yml``.
+
+Here is the link point to [CircleCI for this project](https://app.circleci.com/pipelines/github/aioniclabs/webrtc-sfu).
+
+
+
+Code Structure
+========================================
+
+Files
+------------------------------
+
+Docs site
+------------------------------
+
+You can build API documentation site via command:
+
+```sh
+cargo doc
+```
+
+
+Launching Flow in Program
+------------------------------
+
+
+States save/load
+------------------------------
+
+
+
+Extra Learning
+========================================
+
+This project shows that:
+
+* we can leverage existing WebRTC libraries to build our SFU server
+* we can reuse whatever pub/sub pattern message bus for media distribution
+* the WebRTC signaling exchange can simplify to 1 HTTP request/response
+
+
+
+Future Works
+========================================
+
+* [X] audio codec: Opus
+* [X] video codec: VP8
+* [X] RTP BUNDLE
+* [X] RTCP mux
+* [X] Multistream (1 connnetion for multiple video/audio streams)
+* [X] Datachannel
+* [X] WebRTC Renegotiation
+* [X] case: new publisher join, subscriber can get new streams
+* [X] case: publisher leave, subscriber can know and delete stuffs
+* [X] case: subscriber join in the middle, can get existing publishers' streams
+* [ ] case: publisher leave and rejoin again
