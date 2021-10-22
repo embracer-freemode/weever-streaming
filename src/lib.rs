@@ -1421,7 +1421,7 @@ async fn publish(auth: BearerAuth,
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
     let tid = now.wrapping_div(10000) as u16;
 
-    tokio::spawn(webrtc_to_nats(cli.get_ref().clone(), room.clone(), id.clone(), sdp, tx, tid));
+    tokio::spawn(catch(webrtc_to_nats(cli.get_ref().clone(), room.clone(), id.clone(), sdp, tx, tid)));
     // TODO: timeout
     let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
     debug!("SDP answer: {:.20}", sdp_answer);
@@ -1464,11 +1464,20 @@ async fn subscribe(auth: BearerAuth,
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
     let tid = now.wrapping_div(10000) as u16;
 
-    tokio::spawn(nats_to_webrtc(cli.get_ref().clone(), room.clone(), id.clone(), sdp, tx, tid));
+    tokio::spawn(catch(nats_to_webrtc(cli.get_ref().clone(), room.clone(), id.clone(), sdp, tx, tid)));
     // TODO: timeout
     let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
     debug!("SDP answer: {:.20}", sdp_answer);
     HttpResponse::Created() // 201
         .content_type("application/sdp")
         .body(sdp_answer)
+}
+
+async fn catch<F>(future: F)
+where
+	F: std::future::Future<Output = Result<()>>,
+{
+	if let Err(err) = future.await {
+		log::error!("{:?}", err);
+	}
 }
