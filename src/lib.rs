@@ -1,6 +1,7 @@
 //! WebRTC SFU with horizontal scale design
 
 use anyhow::{Result, Context, bail};
+use async_trait::async_trait;
 use log::{debug, info, warn, error};
 use interceptor::registry::Registry;
 use rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
@@ -89,7 +90,7 @@ fn main() -> Result<()> {
 
 
 #[derive(Debug, Default)]
-struct State {
+struct InternalState {
     rooms: HashMap<String, Room>,
 }
 
@@ -112,8 +113,125 @@ struct PeerConnetionInfo {
     // notify_close: ...,
 }
 
-static HACK_STATE: Lazy<Mutex<State>> = Lazy::new(|| Default::default());
+type LocalState = Lazy<Mutex<InternalState>>;
+static LOCAL_STATE: LocalState = Lazy::new(|| Default::default());
 
+// TODO: redesign the tracking data structure
+#[async_trait]
+trait SharedState {
+    fn set_pub_token(&self, room: String, user: String, token: String);
+    fn set_sub_token(&self, room: String, user: String, token: String);
+    fn get_pub_token(&self, room: &str, user: &str) -> Option<String>;
+    fn get_sub_token(&self, room: &str, user: &str) -> Option<String>;
+    fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String);
+    fn get_user_track_to_mime(&self, room: &str) -> HashMap<(String, String), String>;
+    fn remove_user_track_to_mime(&self, room: &str, user: &str);
+    fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>);
+
+    async fn send_pub_join(&self, room: String, pub_user: String);
+    async fn on_pub_join(&self, room: String, pub_user: String);
+    async fn send_pub_leave(&self, room: &str, pub_user: &str);
+    async fn on_pub_leave(&self, room: &str, pub_user: &str);
+
+    // fn send_sub_join();
+    // fn on_sub_join();
+    // fn send_sub_leave();
+    // fn on_sub_leave();
+}
+
+#[async_trait]
+impl SharedState for LocalState {
+    fn set_pub_token(&self, room: String, user: String, token: String) {
+        let mut state = self.lock().unwrap();
+        let room = state.rooms.entry(room).or_default();
+        let pub_token = room.pub_tokens.entry(user).or_default();
+        *pub_token = token;
+    }
+
+    fn set_sub_token(&self, room: String, user: String, token: String) {
+        let mut state = self.lock().unwrap();
+        let room = state.rooms.entry(room).or_default();
+        let sub_token = room.sub_tokens.entry(user).or_default();
+        *sub_token = token;
+    }
+
+    fn get_pub_token(&self, room: &str, user: &str) -> Option<String> {
+        let mut state = self.lock().unwrap();
+        let room = state.rooms.entry(room.to_string()).or_default();
+        room.pub_tokens.get(user).cloned()
+    }
+
+    fn get_sub_token(&self, room: &str, user: &str) -> Option<String> {
+        let mut state = self.lock().unwrap();
+        let room = state.rooms.entry(room.to_string()).or_default();
+        room.sub_tokens.get(user).cloned()
+    }
+
+    fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) {
+        let room_info = self.lock();
+        let mut room_info = room_info.unwrap();
+        let room_info = room_info.rooms.entry(room).or_default();
+        room_info.user_track_to_mime.insert((user, track), mime);
+    }
+
+    fn get_user_track_to_mime(&self, room: &str) -> HashMap<(String, String), String> {
+        self.lock().unwrap().rooms.get(room).unwrap().user_track_to_mime.clone()  // TODO: avoid this clone?
+    }
+
+    fn remove_user_track_to_mime(&self, room: &str, user: &str) {
+        let mut tracks = vec![];
+        let mut state = self.lock().unwrap();
+        let room_obj = state.rooms.get(&room.to_string()).unwrap();
+        for ((pub_user, track_id), _) in room_obj.user_track_to_mime.iter() {
+            if pub_user == &user {
+                tracks.push(track_id.to_string());
+            }
+        }
+        let user_track_to_mime = &mut state.rooms.get_mut(&room.to_string()).unwrap().user_track_to_mime;
+        for track in tracks {
+            user_track_to_mime.remove(&(user.to_string(), track.to_string()));
+        }
+    }
+
+    fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>) {
+        let mut state = self.lock().unwrap();
+        let room = state.rooms.get_mut(room).unwrap();
+        let user = room.sub_peers.entry(user.to_string()).or_default();
+        user.notify_message = Some(Arc::new(sender.clone()));
+    }
+
+    async fn send_pub_join(&self, room: String, pub_user: String) {
+        self.on_pub_join(room, pub_user).await
+    }
+
+    async fn on_pub_join(&self, room: String, pub_user: String) {
+        let subs = {
+            let state = self.lock().unwrap();
+            let room = state.rooms.get(&room).unwrap();
+            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
+        };
+        for sub in subs {
+            // TODO: special enum for all the cases
+            sub.send(format!("PUB_JOIN {}", pub_user)).await.unwrap();
+        }
+    }
+
+    async fn send_pub_leave(&self, room: &str, pub_user: &str) {
+        self.on_pub_leave(room, pub_user).await
+    }
+
+    async fn on_pub_leave(&self, room: &str, pub_user: &str) {
+        let subs = {
+            let state = self.lock().unwrap();
+            let room = state.rooms.get(room).unwrap();
+            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
+        };
+        for sub in subs {
+            // TODO: special enum for all the cases
+            sub.send(format!("PUB_LEFT {}", pub_user)).await.unwrap();
+        }
+    }
+}
 
 /////////////
 // Publisher
@@ -248,26 +366,12 @@ impl PublisherDetails {
 
             // TODO: global cache for media count
             if sdp_media.starts_with("video") {
-                // FIXME: use better way
-                // TODO: add id in
-                {
-                    let room_info = HACK_STATE.lock();
-                    let mut room_info = room_info.unwrap();
-                    let room_info = room_info.rooms.entry(self.room.clone()).or_default();
-                    room_info.user_track_to_mime.insert((self.user.clone(), id.to_string()), "video".to_string());
-                }
+                LOCAL_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "video".to_string());
                 self.pc
                     .add_transceiver_from_kind(RTPCodecType::Video, &[])
                     .await?;
             } else if sdp_media.starts_with("audio") {
-                // FIXME: use better way
-                // TODO: add id in
-                {
-                    let room_info = HACK_STATE.lock();
-                    let mut room_info = room_info.unwrap();
-                    let room_info = room_info.rooms.entry(self.room.clone()).or_default();
-                    room_info.user_track_to_mime.insert((self.user.clone(), id.to_string()), "audio".to_string());
-                }
+                LOCAL_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "audio".to_string());
                 self.pc
                     .add_transceiver_from_kind(RTPCodecType::Audio, &[])
                     .await?;
@@ -393,16 +497,7 @@ impl PublisherDetails {
     /// ask subscribers to renegotiation
     async fn notify_subs_for_join(&self) {
         info!("notify subscribers for publisher join");
-        let subs = {
-            let state = HACK_STATE.lock().unwrap();
-            let room = state.rooms.get(&self.room).unwrap();
-            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
-        };
-        let user = self.user.clone();
-        for sub in subs {
-            // TODO: special enum for all the cases
-            sub.send(format!("PUB_JOIN {}", user)).await.unwrap();
-        }
+        LOCAL_STATE.send_pub_join(self.room.clone(), self.user.clone()).await;
     }
 
     /// tell subscribers a new publisher just leave
@@ -414,30 +509,9 @@ impl PublisherDetails {
             let user = user.clone();   // TODO: avoid this?
 
             // remove from global state
-            let mut tracks = vec![];    // TODO: better mechanism
-            {
-                let mut state = HACK_STATE.lock().unwrap();
-                let room_obj = state.rooms.get(&room).unwrap();
-                for ((pub_user, track_id), _) in room_obj.user_track_to_mime.iter() {
-                    if pub_user == &user {
-                        tracks.push(track_id.to_string());
-                    }
-                }
-                let user_track_to_mime = &mut state.rooms.get_mut(&room).unwrap().user_track_to_mime;
-                for track in tracks {
-                    user_track_to_mime.remove(&(user.to_string(), track.to_string()));
-                }
-            }
-
-            let subs = {
-                let state = HACK_STATE.lock().unwrap();
-                let room = state.rooms.get(&room).unwrap();
-                room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
-            };
-            for sub in subs {
-                // TODO: special enum for all the cases
-                sub.send(format!("PUB_LEFT {}", user)).await.unwrap();
-            }
+            // TODO: better mechanism
+            LOCAL_STATE.remove_user_track_to_mime(&room, &user);
+            LOCAL_STATE.send_pub_leave(&room, &user).await;
         }.instrument(tracing::Span::current()));
     }
 }
@@ -656,7 +730,7 @@ impl SubscriberDetails {
         // TODO: how to handle video/audio from same publisher and send to different track?
         // HACK_MEDIA.lock().unwrap().push("video".to_string());
 
-        let media = HACK_STATE.lock().unwrap().rooms.get(&self.room).unwrap().user_track_to_mime.clone(); // TODO: avoid this?
+        let media = LOCAL_STATE.get_user_track_to_mime(&self.room);
         for ((user, track_id), mime) in media {
             let app_id = match mime.as_ref() {
                 "video" => "video0",
@@ -721,10 +795,7 @@ impl SubscriberDetails {
     fn register_notify_message(&mut self) {
         // set notify
         let (sender, receiver) = mpsc::channel(10);
-        let mut state = HACK_STATE.lock().unwrap();
-        let room = state.rooms.get_mut(&self.room).unwrap();
-        let user = room.sub_peers.entry(self.user.clone()).or_default();
-        user.notify_message = Some(Arc::new(sender.clone()));
+        LOCAL_STATE.set_sub_notify(&self.room, &self.user, sender.clone());
         self.notify_sender = Some(sender);
         self.notify_receiver = Some(receiver);
     }
@@ -879,7 +950,7 @@ impl SubscriberDetails {
                     let msg = timeout(max_time, notify_message.recv()).await;
                     if let Ok(msg) = msg {
                         // we get data before timeout
-                        let media = HACK_STATE.lock().unwrap().rooms.get(&room).unwrap().user_track_to_mime.clone(); // TODO: avoid this?
+                        let media = LOCAL_STATE.get_user_track_to_mime(&room);
 
                         let msg = msg.unwrap();
 
@@ -1161,6 +1232,7 @@ impl SubscriberDetails {
         let subject = self.get_nats_subect();
         let sub = self.nats.subscribe(&subject).await?;
         let tracks = self.tracks.clone();
+        let sub_user = self.user.clone();
 
         // Read RTP packets forever and send them to the WebRTC Client
         tokio::spawn(async move {
@@ -1363,10 +1435,7 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
     // TODO: save to cache that shared across instances
     info!("create pub: {:?}", params);
     if let Some(token) = params.token.clone() {
-        let mut state = HACK_STATE.lock().unwrap();
-        let room = state.rooms.entry(params.room.clone()).or_default();
-        let pub_token = room.pub_tokens.entry(params.id.clone()).or_default();
-        *pub_token = token;
+        LOCAL_STATE.set_pub_token(params.room.clone(), params.id.clone(), token);
     }
     "pub set"
 }
@@ -1377,10 +1446,7 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
     // TODO: save to cache that shared across instances
     info!("create sub: {:?}", params);
     if let Some(token) = params.token.clone() {
-        let mut state = HACK_STATE.lock().unwrap();
-        let room = state.rooms.entry(params.room.clone()).or_default();
-        let sub_token = room.sub_tokens.entry(params.id.clone()).or_default();
-        *sub_token = token;
+        LOCAL_STATE.set_sub_token(params.room.clone(), params.id.clone(), token);
     }
     "sub set"
 }
@@ -1399,9 +1465,7 @@ async fn publish(auth: BearerAuth,
 
     // token verification
     {
-        let mut state = HACK_STATE.lock().unwrap();
-        let room = state.rooms.entry(room.clone()).or_default();
-        let token = room.pub_tokens.get(&id);
+        let token = LOCAL_STATE.get_sub_token(&room, &id);
         if let Some(token) = token {
             if token != auth.token() {
                 return HttpResponse::Unauthorized().body("bad token");
@@ -1442,9 +1506,7 @@ async fn subscribe(auth: BearerAuth,
 
     // token verification
     {
-        let mut state = HACK_STATE.lock().unwrap();
-        let room = state.rooms.entry(room.clone()).or_default();
-        let token = room.sub_tokens.get(&id);
+        let token = LOCAL_STATE.get_sub_token(&room, &id);
         if let Some(token) = token {
             if token != auth.token() {
                 return HttpResponse::Unauthorized().body("bad token");
