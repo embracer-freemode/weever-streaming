@@ -3,8 +3,8 @@
 use anyhow::{Result, Context, bail};
 use async_trait::async_trait;
 use log::{debug, info, warn, error};
-use interceptor::registry::Registry;
-use rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
+use webrtc::interceptor::registry::Registry;
+use webrtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
 use webrtc::api::interceptor_registry::register_default_interceptors;
 use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS, MIME_TYPE_VP8};
 use webrtc::api::APIBuilder;

@@ -3127,9 +3127,9 @@ dependencies = [
 
 [[package]]
 name = "webrtc"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df53987eb438dc5fb3a31dba347e7c943e462121d2538bb3c46d5fe47aa81265"
+checksum = "75ba210443b69381a2c532104fbb127558e44f7821bf916cdf3a7da98c13b75e"
 dependencies = [
  "async-trait",
  "base64",
@@ -3293,14 +3293,12 @@ dependencies = [
  "actix-web",
  "actix-web-httpauth",
  "anyhow",
+ "async-trait",
  "base64",
  "clap",
- "interceptor",
  "log",
  "nats",
  "once_cell",
- "rtcp",
- "rtp",
  "rustls 0.20.0",
  "rustls-pemfile",
  "serde",
@@ -3311,7 +3309,6 @@ dependencies = [
  "tracing-log",
  "tracing-subscriber",
  "webrtc",
- "webrtc-util",
 ]
 
 [[package]]
