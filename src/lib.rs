@@ -1245,6 +1245,10 @@ impl SubscriberDetails {
                 let mut it = msg.subject.rsplitn(3, ".").take(2);
                 let track_id = it.next().unwrap().to_string();
                 let user = it.next().unwrap().to_string();
+                // TODO: don't push the RTP to subscriber is the publisher has same id
+                if user == sub_user {
+                    continue;
+                }
                 let track = {
                     let tracks = tracks.read().unwrap();
                     let track = tracks.get(&(user, track_id));
