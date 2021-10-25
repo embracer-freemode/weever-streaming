@@ -1432,27 +1432,61 @@ struct CreateSubParams {
 
 #[post("/create/pub")]
 async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
-    // TODO: save to cache that shared across instances
     info!("create pub: {:?}", params);
+
+    if !params.id.is_empty() {
+        return "id should not be empty";
+    }
+
+    if !params.id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return "id should be ascii alphanumeric";
+    }
+
+    if !params.room.is_empty() {
+        return "room should not be empty";
+    }
+
+    if !params.room.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return "room should be ascii alphanumeric";
+    }
+
     if let Some(token) = params.token.clone() {
         LOCAL_STATE.set_pub_token(params.room.clone(), params.id.clone(), token);
     }
+
     "pub set"
 }
 
 
 #[post("/create/sub")]
 async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
-    // TODO: save to cache that shared across instances
     info!("create sub: {:?}", params);
+
+    if !params.id.is_empty() {
+        return "id should not be empty";
+    }
+
+    if !params.id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return "id should be ascii alphanumeric";
+    }
+
+    if !params.room.is_empty() {
+        return "room should not be empty";
+    }
+
+    if !params.room.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return "room should be ascii alphanumeric";
+    }
+
     if let Some(token) = params.token.clone() {
         LOCAL_STATE.set_sub_token(params.room.clone(), params.id.clone(), token);
     }
+
     "sub set"
 }
 
 
-/// WebRTC WHIP compatible endpoint for publisher
+/// WebRTC WHIP compatible (sort of) endpoint for publisher
 #[post("/pub/{room}/{id}")]
 async fn publish(auth: BearerAuth,
                  cli: web::Data<cli::CliOptions>,
@@ -1460,6 +1494,22 @@ async fn publish(auth: BearerAuth,
                  sdp: web::Bytes) -> impl Responder {
                  // web::Json(sdp): web::Json<RTCSessionDescription>) -> impl Responder {
     let (room, id) = path.into_inner();
+
+    if !id.is_empty() {
+        return HttpResponse::BadRequest().body("id should not be empty");
+    }
+
+    if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return HttpResponse::BadRequest().body("id should be ascii alphanumeric");
+    }
+
+    if !room.is_empty() {
+        return HttpResponse::BadRequest().body("room should not be empty");
+    }
+
+    if !room.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return HttpResponse::BadRequest().body("room should be ascii alphanumeric");
+    }
 
     // TODO: verify "Content-Type: application/sdp"
 
@@ -1501,6 +1551,22 @@ async fn subscribe(auth: BearerAuth,
                    path: web::Path<(String, String)>,
                    sdp: web::Bytes) -> impl Responder {
     let (room, id) = path.into_inner();
+
+    if !id.is_empty() {
+        return HttpResponse::BadRequest().body("id should not be empty");
+    }
+
+    if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return HttpResponse::BadRequest().body("id should be ascii alphanumeric");
+    }
+
+    if !room.is_empty() {
+        return HttpResponse::BadRequest().body("room should not be empty");
+    }
+
+    if !room.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return HttpResponse::BadRequest().body("room should be ascii alphanumeric");
+    }
 
     // TODO: verify "Content-Type: application/sdp"
 
