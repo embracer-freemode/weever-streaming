@@ -294,6 +294,7 @@ struct PublisherDetails {
     pc: Arc<RTCPeerConnection>,
     nats: nats::asynk::Connection,
     notify_close: Arc<tokio::sync::Notify>,
+    created: std::time::SystemTime,
 }
 
 // for logging only
@@ -510,6 +511,7 @@ impl PublisherDetails {
         let room = self.room.clone();
         let user = self.user.clone();
         let notify_close = self.notify_close.clone();
+        let created = self.created.clone();
 
         Box::new(move |s: RTCPeerConnectionState| {
             let _enter = span.enter();  // populate user & room info in following logs
@@ -536,9 +538,11 @@ impl PublisherDetails {
                 // TODO: make sure we will cleanup related stuffs
             }
 
-            // if s == RTCPeerConnectionState::Connected {
-            //     info!("webrtc to nats connected!");
-            // }
+            if s == RTCPeerConnectionState::Connected {
+                let now = std::time::SystemTime::now();
+                let duration = now.duration_since(created).unwrap().as_millis();
+                info!("Peer Connection connected! spent {} ms from created", duration);
+            }
 
             Box::pin(async {})
         })
@@ -588,6 +592,7 @@ async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, offer:
         pc: peer_connection.clone(),
         nats: nc.clone(),
         notify_close: Default::default(),
+        created: std::time::SystemTime::now(),
     };  // TODO: remove clone
 
     publisher.add_transceivers_based_on_sdp(&offer).await.context("add tranceivers based on SDP failed")?;
@@ -674,6 +679,7 @@ struct SubscriberDetails {
     rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
     notify_sender: Option<mpsc::Sender<String>>,
     notify_receiver: Option<mpsc::Receiver<String>>,
+    created: std::time::SystemTime,
 }
 
 // for logging only
@@ -864,6 +870,7 @@ impl SubscriberDetails {
     fn on_peer_connection_state_change(&self) -> OnPeerConnectionStateChangeHdlrFn {
         let span = tracing::Span::current();
         let notify_close = self.notify_close.clone();
+        let created = self.created.clone();
         Box::new(move |s: RTCPeerConnectionState| {
             let _enter = span.enter();  // populate user & room info in following logs
             info!("PeerConnection State has changed: {}", s);
@@ -879,8 +886,11 @@ impl SubscriberDetails {
                 notify_close.notify_waiters();
             }
 
-            // if s == RTCPeerConnectionState::Connected {
-            // }
+            if s == RTCPeerConnectionState::Connected {
+                let now = std::time::SystemTime::now();
+                let duration = now.duration_since(created).unwrap().as_millis();
+                info!("Peer Connection connected! spent {} ms from created", duration);
+            }
 
             Box::pin(async {})
         })
@@ -1363,6 +1373,7 @@ async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, offer:
         rtp_senders: Default::default(),
         notify_sender: None,
         notify_receiver: None,
+        created: std::time::SystemTime::now(),
     };
 
     subscriber.add_trasceivers_based_on_room().await?;
