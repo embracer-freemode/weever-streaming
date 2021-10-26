@@ -484,7 +484,12 @@ impl PublisherDetails {
         // TODO: can we use SSRC?
         tokio::spawn(async move {
             // FIXME: the id here generated from browser might be "{...}"
-            let subject = format!("{}.{}", subject, track.id().await);
+            let kind = match track.kind() {
+                RTPCodecType::Video => "v",
+                RTPCodecType::Audio => "a",
+                RTPCodecType::Unspecified => "u",
+            };
+            let subject = format!("{}.{}.{}", subject, kind, track.id().await);
             info!("publish to {}", subject);
             let mut b = vec![0u8; 1500];
             while let Ok((n, _)) = track.read(&mut b).await {
@@ -1301,10 +1306,10 @@ impl SubscriberDetails {
                 let raw_rtp = msg.data;
 
                 // TODO: real dyanmic dispatch for RTP
-                // subject sample: "rtc.1234.user1.video1"
-                let mut it = msg.subject.rsplitn(3, ".").take(2);
+                // subject sample: "rtc.1234.user1.v.video1" "rtc.1234.user1.a.audio1"
+                let mut it = msg.subject.rsplitn(4, ".").take(2);
                 let track_id = it.next().unwrap().to_string();
-                let user = it.next().unwrap().to_string();
+                let user = it.skip(1).next().unwrap().to_string();
                 // TODO: don't push the RTP to subscriber is the publisher has same id
                 if user == sub_user {
                     continue;
