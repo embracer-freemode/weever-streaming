@@ -673,6 +673,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "combine"
+version = "4.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a909e4d93292cd8e9c42e189f61681eff9d67b6541f96b8a1a737f23737bd001"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "memchr",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1004,6 +1018,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "dtoa"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56899898ce76aaf4a0f24d914c97ea6ed976d42fec6ad33fcbb0a1103e07b2b0"
 
 [[package]]
 name = "ecdsa"
@@ -2078,6 +2098,26 @@ dependencies = [
  "ring",
  "x509-parser 0.12.0",
  "yasna",
+]
+
+[[package]]
+name = "redis"
+version = "0.21.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd71bdb3d0d6e9183e675c977f652fbf8abc3b63fcb722e9abb42f82ef839b65"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "combine",
+ "dtoa",
+ "futures-util",
+ "itoa",
+ "percent-encoding",
+ "pin-project-lite",
+ "sha1",
+ "tokio",
+ "tokio-util",
+ "url",
 ]
 
 [[package]]
@@ -3299,6 +3339,7 @@ dependencies = [
  "log",
  "nats",
  "once_cell",
+ "redis",
  "rustls 0.20.0",
  "rustls-pemfile",
  "serde",
