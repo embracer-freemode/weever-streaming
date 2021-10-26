@@ -122,6 +122,7 @@ static LOCAL_STATE: LocalState = Lazy::new(|| Default::default());
 trait SharedState {
     fn set_nats(&self, nats: nats::asynk::Connection);
     fn get_nats(&self) -> nats::asynk::Connection;
+    async fn listen_on_commands(&self) -> Result<()>;
     fn set_pub_token(&self, room: String, user: String, token: String);
     fn set_sub_token(&self, room: String, user: String, token: String);
     fn get_pub_token(&self, room: &str, user: &str) -> Option<String>;
@@ -131,8 +132,8 @@ trait SharedState {
     fn remove_user_track_to_mime(&self, room: &str, user: &str);
     fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>);
 
-    async fn send_pub_join(&self, room: String, pub_user: String);
-    async fn on_pub_join(&self, room: String, pub_user: String);
+    async fn send_pub_join(&self, room: &str, pub_user: &str);
+    async fn on_pub_join(&self, room: &str, pub_user: &str);
     async fn send_pub_leave(&self, room: &str, pub_user: &str);
     async fn on_pub_leave(&self, room: &str, pub_user: &str);
 
@@ -152,6 +153,37 @@ impl SharedState for LocalState {
     fn get_nats(&self) -> nats::asynk::Connection {
         let state = self.lock().unwrap();
         state.nats.as_ref().unwrap().clone()
+    }
+
+    async fn listen_on_commands(&self) -> Result<()> {
+        let nats = self.get_nats();
+        // cmd.ROOM
+        // e.g. cmd.1234
+        let subject = "cmd.*";
+        let sub = nats.subscribe(subject).await?;
+
+        async fn process(msg: nats::asynk::Message) -> Result<()> {
+            let room = msg.subject.splitn(2, ".").skip(1).next().unwrap();
+            let msg = String::from_utf8(msg.data.to_vec()).unwrap();
+            info!("internal NATS cmd, room {} msg '{}'", room, msg);
+            if msg.starts_with("PUB_LEFT ") {
+                let user = msg.splitn(2, " ").skip(1).next().unwrap();
+                LOCAL_STATE.on_pub_leave(room, user).await;
+            } else if msg.starts_with("PUB_JOIN ") {
+                let user = msg.splitn(2, " ").skip(1).next().unwrap();
+                LOCAL_STATE.on_pub_join(room, user).await;
+            }
+            Ok(())
+        }
+
+        tokio::spawn(async move {
+            // TODO: will we exit this loop when disconnect?
+            while let Some(msg) = sub.next().await {
+                tokio::spawn(catch(process(msg)));
+            }
+        });
+
+        Ok(())
     }
 
     fn set_pub_token(&self, room: String, user: String, token: String) {
@@ -213,14 +245,17 @@ impl SharedState for LocalState {
         user.notify_message = Some(Arc::new(sender.clone()));
     }
 
-    async fn send_pub_join(&self, room: String, pub_user: String) {
-        self.on_pub_join(room, pub_user).await
+    async fn send_pub_join(&self, room: &str, pub_user: &str) {
+        let subject = format!("cmd.{}", room);
+        let msg = format!("PUB_JOIN {}", pub_user);
+        let nats = self.get_nats();
+        nats.publish(&subject, msg).await.unwrap();
     }
 
-    async fn on_pub_join(&self, room: String, pub_user: String) {
+    async fn on_pub_join(&self, room: &str, pub_user: &str) {
         let subs = {
             let state = self.lock().unwrap();
-            let room = state.rooms.get(&room).unwrap();
+            let room = state.rooms.get(&room.to_string()).unwrap();
             room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
         };
         for sub in subs {
@@ -230,7 +265,10 @@ impl SharedState for LocalState {
     }
 
     async fn send_pub_leave(&self, room: &str, pub_user: &str) {
-        self.on_pub_leave(room, pub_user).await
+        let subject = format!("cmd.{}", room);
+        let msg = format!("PUB_LEFT {}", pub_user);
+        let nats = self.get_nats();
+        nats.publish(&subject, msg).await.unwrap();
     }
 
     async fn on_pub_leave(&self, room: &str, pub_user: &str) {
@@ -510,7 +548,7 @@ impl PublisherDetails {
     /// ask subscribers to renegotiation
     async fn notify_subs_for_join(&self) {
         info!("notify subscribers for publisher join");
-        LOCAL_STATE.send_pub_join(self.room.clone(), self.user.clone()).await;
+        LOCAL_STATE.send_pub_join(&self.room, &self.user).await;
     }
 
     /// tell subscribers a new publisher just leave
@@ -1416,6 +1454,8 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
     info!("connecting NATS");
     let nats = nats::asynk::connect(&cli.nats).await.context("can't connect to NATS")?;
     LOCAL_STATE.set_nats(nats);
+    // run task for listening upcoming commands
+    LOCAL_STATE.listen_on_commands().await;
 
     let url = format!("{}:{}", cli.host, cli.port);
     HttpServer::new(move || {
