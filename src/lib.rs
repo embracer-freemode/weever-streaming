@@ -1587,7 +1587,7 @@ async fn publish(auth: BearerAuth,
 
     // token verification
     {
-        let token = LOCAL_STATE.get_sub_token(&room, &id);
+        let token = LOCAL_STATE.get_pub_token(&room, &id);
         if let Some(token) = token {
             if token != auth.token() {
                 return HttpResponse::Unauthorized().body("bad token");
