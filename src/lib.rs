@@ -49,7 +49,8 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 use tracing::{Instrument, info_span};
 use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
-use std::sync::Mutex;
+use redis::aio::MultiplexedConnection;
+use redis::AsyncCommands;
 use std::sync::RwLock;
 
 mod cli;
@@ -89,16 +90,21 @@ fn main() -> Result<()> {
 }
 
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 struct InternalState {
     rooms: HashMap<String, Room>,
     nats: Option<nats::asynk::Connection>,
+    redis: Option<MultiplexedConnection>,
 }
 
 #[derive(Debug, Default)]
 struct Room {
     name: String,
     /// (user, track id) -> mime type
+    ///
+    /// usage for this:
+    /// 1. know how many media in a room
+    /// 2. know how many media for each publisher
     user_track_to_mime: HashMap<(String, String), String>,
     sub_peers: HashMap<String, PeerConnetionInfo>,
     /// user -> token
@@ -114,22 +120,24 @@ struct PeerConnetionInfo {
     // notify_close: ...,
 }
 
-type LocalState = Lazy<Mutex<InternalState>>;
+type LocalState = Lazy<RwLock<InternalState>>;
 static LOCAL_STATE: LocalState = Lazy::new(|| Default::default());
 
 // TODO: redesign the tracking data structure
 #[async_trait]
 trait SharedState {
+    fn set_redis(&self, conn: MultiplexedConnection);
+    fn get_redis(&self) -> MultiplexedConnection;
     fn set_nats(&self, nats: nats::asynk::Connection);
     fn get_nats(&self) -> nats::asynk::Connection;
     async fn listen_on_commands(&self) -> Result<()>;
-    fn set_pub_token(&self, room: String, user: String, token: String);
-    fn set_sub_token(&self, room: String, user: String, token: String);
-    fn get_pub_token(&self, room: &str, user: &str) -> Option<String>;
-    fn get_sub_token(&self, room: &str, user: &str) -> Option<String>;
-    fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String);
-    fn get_user_track_to_mime(&self, room: &str) -> HashMap<(String, String), String>;
-    fn remove_user_track_to_mime(&self, room: &str, user: &str);
+    async fn set_pub_token(&self, room: String, user: String, token: String);
+    async fn set_sub_token(&self, room: String, user: String, token: String);
+    async fn get_pub_token(&self, room: &str, user: &str) -> Option<String>;
+    async fn get_sub_token(&self, room: &str, user: &str) -> Option<String>;
+    async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String);
+    async fn get_user_track_to_mime(&self, room: &str) -> HashMap<(String, String), String>;
+    async fn remove_user_track_to_mime(&self, room: &str, user: &str);
     fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>);
 
     async fn send_pub_join(&self, room: &str, pub_user: &str);
@@ -145,13 +153,23 @@ trait SharedState {
 
 #[async_trait]
 impl SharedState for LocalState {
+    fn set_redis(&self, conn: MultiplexedConnection) {
+        let mut state = self.write().unwrap();
+        state.redis = Some(conn);
+    }
+
+    fn get_redis(&self) -> MultiplexedConnection {
+        let state = self.read().unwrap();
+        state.redis.as_ref().unwrap().clone()
+    }
+
     fn set_nats(&self, nats: nats::asynk::Connection) {
-        let mut state = self.lock().unwrap();
+        let mut state = self.write().unwrap();
         state.nats = Some(nats);
     }
 
     fn get_nats(&self) -> nats::asynk::Connection {
-        let state = self.lock().unwrap();
+        let state = self.read().unwrap();
         state.nats.as_ref().unwrap().clone()
     }
 
@@ -186,61 +204,119 @@ impl SharedState for LocalState {
         Ok(())
     }
 
-    fn set_pub_token(&self, room: String, user: String, token: String) {
-        let mut state = self.lock().unwrap();
-        let room = state.rooms.entry(room).or_default();
-        let pub_token = room.pub_tokens.entry(user).or_default();
-        *pub_token = token;
+    async fn set_pub_token(&self, room: String, user: String, token: String) {
+        // local version:
+        // let mut state = self.lock().unwrap();
+        // let room = state.rooms.entry(room).or_default();
+        // let pub_token = room.pub_tokens.entry(user).or_default();
+        // *pub_token = token;
+
+        // redis version:
+        let mut conn = self.get_redis();
+        let key = format!("token#pub#{}#{}", room, user);
+        let _: Option<()> = conn.set(key, token).await.unwrap();
     }
 
-    fn set_sub_token(&self, room: String, user: String, token: String) {
-        let mut state = self.lock().unwrap();
-        let room = state.rooms.entry(room).or_default();
-        let sub_token = room.sub_tokens.entry(user).or_default();
-        *sub_token = token;
+    async fn set_sub_token(&self, room: String, user: String, token: String) {
+        // local version:
+        // let mut state = self.lock().unwrap();
+        // let room = state.rooms.entry(room).or_default();
+        // let sub_token = room.sub_tokens.entry(user).or_default();
+        // *sub_token = token;
+
+        // redis version:
+        let mut conn = self.get_redis();
+        let key = format!("token#sub#{}#{}", room, user);
+        let _: Option<()> = conn.set(key, token).await.unwrap();
     }
 
-    fn get_pub_token(&self, room: &str, user: &str) -> Option<String> {
-        let mut state = self.lock().unwrap();
-        let room = state.rooms.entry(room.to_string()).or_default();
-        room.pub_tokens.get(user).cloned()
+    async fn get_pub_token(&self, room: &str, user: &str) -> Option<String> {
+        // local version:
+        // let mut state = self.lock().unwrap();
+        // let room = state.rooms.entry(room.to_string()).or_default();
+        // room.pub_tokens.get(user).cloned()
+
+        // redis version:
+        let mut conn = self.get_redis();
+        let key = format!("token#pub#{}#{}", room, user);
+        conn.get(key).await.unwrap()
     }
 
-    fn get_sub_token(&self, room: &str, user: &str) -> Option<String> {
-        let mut state = self.lock().unwrap();
-        let room = state.rooms.entry(room.to_string()).or_default();
-        room.sub_tokens.get(user).cloned()
+    async fn get_sub_token(&self, room: &str, user: &str) -> Option<String> {
+        // local version:
+        // let mut state = self.lock().unwrap();
+        // let room = state.rooms.entry(room.to_string()).or_default();
+        // room.sub_tokens.get(user).cloned()
+
+        // redis version:
+        let mut conn = self.get_redis();
+        let key = format!("token#sub#{}#{}", room, user);
+        conn.get(key).await.unwrap()
     }
 
-    fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) {
-        let room_info = self.lock();
-        let mut room_info = room_info.unwrap();
-        let room_info = room_info.rooms.entry(room).or_default();
-        room_info.user_track_to_mime.insert((user, track), mime);
+    async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) {
+        // local version:
+        // let room_info = self.lock();
+        // let mut room_info = room_info.unwrap();
+        // let room_info = room_info.rooms.entry(room).or_default();
+        // room_info.user_track_to_mime.insert((user, track), mime);
+
+        // redis version:
+        let mut conn = self.get_redis();
+        let redis_key = format!("utm#{}", room);
+        let hash_key = format!("{}#{}", user, track);
+        let _: Option<()> = conn.hset(redis_key, hash_key, mime).await.unwrap();
     }
 
-    fn get_user_track_to_mime(&self, room: &str) -> HashMap<(String, String), String> {
-        self.lock().unwrap().rooms.get(room).unwrap().user_track_to_mime.clone()  // TODO: avoid this clone?
-    }
+    async fn get_user_track_to_mime(&self, room: &str) -> HashMap<(String, String), String> {
+        // local version:
+        // self.lock().unwrap().rooms.get(room).unwrap().user_track_to_mime.clone()  // TODO: avoid this clone?
 
-    fn remove_user_track_to_mime(&self, room: &str, user: &str) {
-        let mut tracks = vec![];
-        let mut state = self.lock().unwrap();
-        let room_obj = state.rooms.get(&room.to_string()).unwrap();
-        for ((pub_user, track_id), _) in room_obj.user_track_to_mime.iter() {
-            if pub_user == &user {
-                tracks.push(track_id.to_string());
-            }
+        // redis version:
+        let mut conn = self.get_redis();
+        let redis_key = format!("utm#{}", room);
+        let utm: HashMap<String, String> = conn.hgetall(redis_key).await.unwrap();
+        let mut result = HashMap::new();
+        for (k, v) in utm.into_iter() {
+            let mut it = k.splitn(2, "#");
+            let user = it.next().unwrap();
+            let track = it.next().unwrap();
+            result.insert((user.to_string(), track.to_string()), v.to_string());
         }
-        let user_track_to_mime = &mut state.rooms.get_mut(&room.to_string()).unwrap().user_track_to_mime;
-        for track in tracks {
-            user_track_to_mime.remove(&(user.to_string(), track.to_string()));
+        result
+    }
+
+    async fn remove_user_track_to_mime(&self, room: &str, user: &str) {
+        // local version:
+        // let mut tracks = vec![];
+        // let mut state = self.lock().unwrap();
+        // let room_obj = state.rooms.get(&room.to_string()).unwrap();
+        // for ((pub_user, track_id), _) in room_obj.user_track_to_mime.iter() {
+        //     if pub_user == &user {
+        //         tracks.push(track_id.to_string());
+        //     }
+        // }
+        // let user_track_to_mime = &mut state.rooms.get_mut(&room.to_string()).unwrap().user_track_to_mime;
+        // for track in tracks {
+        //     user_track_to_mime.remove(&(user.to_string(), track.to_string()));
+        // }
+
+        // redis version:
+        let mut conn = self.get_redis();
+        let redis_key = &format!("utm#{}", room);
+        let user_track_to_mime = self.get_user_track_to_mime(room).await;
+        for ((pub_user, track_id), _) in user_track_to_mime.iter() {
+            if pub_user == &user {
+                let hash_key = format!("{}#{}", user, track_id);
+                let _: Option<()> = conn.hdel(redis_key, hash_key).await.unwrap();
+            }
         }
     }
 
     fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>) {
-        let mut state = self.lock().unwrap();
-        let room = state.rooms.get_mut(room).unwrap();
+        // TODO: convert this write lock to read lock, use field interior mutability
+        let mut state = self.write().unwrap();
+        let room = state.rooms.entry(room.to_string()).or_default();
         let user = room.sub_peers.entry(user.to_string()).or_default();
         user.notify_message = Some(Arc::new(sender.clone()));
     }
@@ -254,7 +330,7 @@ impl SharedState for LocalState {
 
     async fn on_pub_join(&self, room: &str, pub_user: &str) {
         let subs = {
-            let state = self.lock().unwrap();
+            let state = self.read().unwrap();
             let room = state.rooms.get(&room.to_string()).unwrap();
             room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
         };
@@ -273,7 +349,7 @@ impl SharedState for LocalState {
 
     async fn on_pub_leave(&self, room: &str, pub_user: &str) {
         let subs = {
-            let state = self.lock().unwrap();
+            let state = self.read().unwrap();
             let room = state.rooms.get(room).unwrap();
             room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
         };
@@ -418,12 +494,12 @@ impl PublisherDetails {
 
             // TODO: global cache for media count
             if sdp_media.starts_with("video") {
-                LOCAL_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "video".to_string());
+                LOCAL_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "video".to_string()).await;
                 self.pc
                     .add_transceiver_from_kind(RTPCodecType::Video, &[])
                     .await?;
             } else if sdp_media.starts_with("audio") {
-                LOCAL_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "audio".to_string());
+                LOCAL_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "audio".to_string()).await;
                 self.pc
                     .add_transceiver_from_kind(RTPCodecType::Audio, &[])
                     .await?;
@@ -570,7 +646,7 @@ impl PublisherDetails {
 
             // remove from global state
             // TODO: better mechanism
-            LOCAL_STATE.remove_user_track_to_mime(&room, &user);
+            LOCAL_STATE.remove_user_track_to_mime(&room, &user).await;
             LOCAL_STATE.send_pub_leave(&room, &user).await;
         }.instrument(tracing::Span::current()));
     }
@@ -696,7 +772,7 @@ impl std::ops::Drop for SubscriberDetails {
 
 impl SubscriberDetails {
     fn get_nats_subect(&self) -> String {
-        format!("rtc.{}.*.*", self.room)
+        format!("rtc.{}.*.*.*", self.room)
     }
 
     async fn create_pc(stun: String,
@@ -791,7 +867,7 @@ impl SubscriberDetails {
         // TODO: how to handle video/audio from same publisher and send to different track?
         // HACK_MEDIA.lock().unwrap().push("video".to_string());
 
-        let media = LOCAL_STATE.get_user_track_to_mime(&self.room);
+        let media = LOCAL_STATE.get_user_track_to_mime(&self.room).await;
         for ((user, track_id), mime) in media {
             let app_id = match mime.as_ref() {
                 "video" => "video0",
@@ -1015,7 +1091,7 @@ impl SubscriberDetails {
                     let msg = timeout(max_time, notify_message.recv()).await;
                     if let Ok(msg) = msg {
                         // we get data before timeout
-                        let media = LOCAL_STATE.get_user_track_to_mime(&room);
+                        let media = LOCAL_STATE.get_user_track_to_mime(&room).await;
 
                         let msg = msg.unwrap();
 
@@ -1307,7 +1383,7 @@ impl SubscriberDetails {
 
                 // TODO: real dyanmic dispatch for RTP
                 // subject sample: "rtc.1234.user1.v.video1" "rtc.1234.user1.a.audio1"
-                let mut it = msg.subject.rsplitn(4, ".").take(2);
+                let mut it = msg.subject.rsplitn(4, ".").take(3);
                 let track_id = it.next().unwrap().to_string();
                 let user = it.skip(1).next().unwrap().to_string();
                 // TODO: don't push the RTP to subscriber is the publisher has same id
@@ -1466,6 +1542,11 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
         .with_single_cert(cert_chain, key)
         .context("cert setup failed")?;
 
+    // Redis
+    let redis_client = redis::Client::open("redis://127.0.0.1/").unwrap();
+    let conn = redis_client.get_multiplexed_tokio_connection().await.unwrap();
+    LOCAL_STATE.set_redis(conn);
+
     // NATS
     info!("connecting NATS");
     let nats = nats::asynk::connect(&cli.nats).await.context("can't connect to NATS")?;
@@ -1528,7 +1609,7 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
     }
 
     if let Some(token) = params.token.clone() {
-        LOCAL_STATE.set_pub_token(params.room.clone(), params.id.clone(), token);
+        LOCAL_STATE.set_pub_token(params.room.clone(), params.id.clone(), token).await;
     }
 
     "pub set"
@@ -1556,7 +1637,7 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
     }
 
     if let Some(token) = params.token.clone() {
-        LOCAL_STATE.set_sub_token(params.room.clone(), params.id.clone(), token);
+        LOCAL_STATE.set_sub_token(params.room.clone(), params.id.clone(), token).await;
     }
 
     "sub set"
@@ -1592,7 +1673,7 @@ async fn publish(auth: BearerAuth,
 
     // token verification
     {
-        let token = LOCAL_STATE.get_pub_token(&room, &id);
+        let token = LOCAL_STATE.get_pub_token(&room, &id).await;
         if let Some(token) = token {
             if token != auth.token() {
                 return HttpResponse::Unauthorized().body("bad token");
@@ -1649,7 +1730,7 @@ async fn subscribe(auth: BearerAuth,
 
     // token verification
     {
-        let token = LOCAL_STATE.get_sub_token(&room, &id);
+        let token = LOCAL_STATE.get_sub_token(&room, &id).await;
         if let Some(token) = token {
             if token != auth.token() {
                 return HttpResponse::Unauthorized().body("bad token");
