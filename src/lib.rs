@@ -1438,7 +1438,7 @@ struct CreateSubParams {
 async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
     info!("create pub: {:?}", params);
 
-    if !params.id.is_empty() {
+    if params.id.is_empty() {
         return "id should not be empty";
     }
 
@@ -1446,7 +1446,7 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
         return "id should be ascii alphanumeric";
     }
 
-    if !params.room.is_empty() {
+    if params.room.is_empty() {
         return "room should not be empty";
     }
 
@@ -1466,7 +1466,7 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
 async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
     info!("create sub: {:?}", params);
 
-    if !params.id.is_empty() {
+    if params.id.is_empty() {
         return "id should not be empty";
     }
 
@@ -1474,7 +1474,7 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
         return "id should be ascii alphanumeric";
     }
 
-    if !params.room.is_empty() {
+    if params.room.is_empty() {
         return "room should not be empty";
     }
 
@@ -1499,7 +1499,7 @@ async fn publish(auth: BearerAuth,
                  // web::Json(sdp): web::Json<RTCSessionDescription>) -> impl Responder {
     let (room, id) = path.into_inner();
 
-    if !id.is_empty() {
+    if id.is_empty() {
         return HttpResponse::BadRequest().body("id should not be empty");
     }
 
@@ -1507,7 +1507,7 @@ async fn publish(auth: BearerAuth,
         return HttpResponse::BadRequest().body("id should be ascii alphanumeric");
     }
 
-    if !room.is_empty() {
+    if room.is_empty() {
         return HttpResponse::BadRequest().body("room should not be empty");
     }
 
@@ -1556,7 +1556,7 @@ async fn subscribe(auth: BearerAuth,
                    sdp: web::Bytes) -> impl Responder {
     let (room, id) = path.into_inner();
 
-    if !id.is_empty() {
+    if id.is_empty() {
         return HttpResponse::BadRequest().body("id should not be empty");
     }
 
@@ -1564,7 +1564,7 @@ async fn subscribe(auth: BearerAuth,
         return HttpResponse::BadRequest().body("id should be ascii alphanumeric");
     }
 
-    if !room.is_empty() {
+    if room.is_empty() {
         return HttpResponse::BadRequest().body("room should not be empty");
     }
 
