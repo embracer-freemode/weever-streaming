@@ -92,6 +92,7 @@ fn main() -> Result<()> {
 #[derive(Debug, Default)]
 struct InternalState {
     rooms: HashMap<String, Room>,
+    nats: Option<nats::asynk::Connection>,
 }
 
 #[derive(Debug, Default)]
@@ -119,6 +120,8 @@ static LOCAL_STATE: LocalState = Lazy::new(|| Default::default());
 // TODO: redesign the tracking data structure
 #[async_trait]
 trait SharedState {
+    fn set_nats(&self, nats: nats::asynk::Connection);
+    fn get_nats(&self) -> nats::asynk::Connection;
     fn set_pub_token(&self, room: String, user: String, token: String);
     fn set_sub_token(&self, room: String, user: String, token: String);
     fn get_pub_token(&self, room: &str, user: &str) -> Option<String>;
@@ -141,6 +144,16 @@ trait SharedState {
 
 #[async_trait]
 impl SharedState for LocalState {
+    fn set_nats(&self, nats: nats::asynk::Connection) {
+        let mut state = self.lock().unwrap();
+        state.nats = Some(nats);
+    }
+
+    fn get_nats(&self) -> nats::asynk::Connection {
+        let state = self.lock().unwrap();
+        state.nats.as_ref().unwrap().clone()
+    }
+
     fn set_pub_token(&self, room: String, user: String, token: String) {
         let mut state = self.lock().unwrap();
         let room = state.rooms.entry(room).or_default();
@@ -522,9 +535,8 @@ impl PublisherDetails {
 #[tracing::instrument(name = "pub", skip(cli, offer, answer_tx), level = "info")]  // following log will have "pub{room=..., user=...}" in INFO level
 async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, tid: u16) -> Result<()> {
     // NATS
-    // TODO: share NATS connection
-    info!("connecting NATS");
-    let nc = nats::asynk::connect("localhost").await.context("can't connect to NATS")?;
+    info!("getting NATS");
+    let nc = LOCAL_STATE.get_nats();
 
     let peer_connection = Arc::new(PublisherDetails::create_pc(
             cli.stun,
@@ -1292,8 +1304,8 @@ async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, offer:
     let offer = sdp;
 
     // NATS
-    // TODO: share NATS connection
-    let nc = nats::asynk::connect("localhost").await.context("can't connect to NATS")?;
+    info!("getting NATS");
+    let nc = LOCAL_STATE.get_nats();
     let peer_connection = Arc::new(SubscriberDetails::create_pc(
             cli.stun,
             cli.turn,
@@ -1399,6 +1411,11 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
         .with_no_client_auth()
         .with_single_cert(cert_chain, key)
         .context("cert setup failed")?;
+
+    // NATS
+    info!("connecting NATS");
+    let nats = nats::asynk::connect(&cli.nats).await.context("can't connect to NATS")?;
+    LOCAL_STATE.set_nats(nats);
 
     let url = format!("{}:{}", cli.host, cli.port);
     HttpServer::new(move || {
