@@ -331,7 +331,10 @@ impl SharedState for LocalState {
     async fn on_pub_join(&self, room: &str, pub_user: &str) {
         let subs = {
             let state = self.read().unwrap();
-            let room = state.rooms.get(&room.to_string()).unwrap();
+            let room = match state.rooms.get(room) {
+                Some(room) => room,
+                None => return,
+            };
             room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
         };
         for sub in subs {
@@ -350,7 +353,10 @@ impl SharedState for LocalState {
     async fn on_pub_leave(&self, room: &str, pub_user: &str) {
         let subs = {
             let state = self.read().unwrap();
-            let room = state.rooms.get(room).unwrap();
+            let room = match state.rooms.get(room) {
+                Some(room) => room,
+                None => return,
+            };
             room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
         };
         for sub in subs {
