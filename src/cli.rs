@@ -19,6 +19,10 @@ pub struct CliOptions {
     #[clap(short, long, env, default_value = "localhost")]
     pub nats: String,
 
+    /// Redis server URL
+    #[clap(short, long, env, default_value = "redis://127.0.0.1/")]
+    pub redis: String,
+
     /// STUN server URL
     #[clap(long, env, default_value = "stun:stun.l.google.com:19302")]
     pub stun: String,

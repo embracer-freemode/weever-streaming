@@ -1543,7 +1543,7 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
         .context("cert setup failed")?;
 
     // Redis
-    let redis_client = redis::Client::open("redis://127.0.0.1/").unwrap();
+    let redis_client = redis::Client::open(cli.redis.clone()).unwrap();
     let conn = redis_client.get_multiplexed_tokio_connection().await.unwrap();
     LOCAL_STATE.set_redis(conn);
 
