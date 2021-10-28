@@ -78,23 +78,23 @@ WebRTC specs
 * [RFC 8828 - WebRTC IP Address Handling Requirements](https://datatracker.ietf.org/doc/rfc8828/)
 * [RFC 8829 - JavaScript Session Establishment Protocol (JSEP)](https://datatracker.ietf.org/doc/rfc8829/)
     - PeerConnection.addTrack
-          + if the PeerConnection is in the "have-remote-offer" state, the track will be attached to the first compatible transceiver that was created by the most recent call to setRemoteDescription and does not have a local track.
-          + Otherwise, a new transceiver will be created
+        + if the PeerConnection is in the "have-remote-offer" state, the track will be attached to the first compatible transceiver that was created by the most recent call to setRemoteDescription and does not have a local track.
+        + Otherwise, a new transceiver will be created
     - PeerConnection.removeTrack
-          + The sender's track is cleared, and the sender stops sending.
-          + Future calls to createOffer will mark the "m=" section associated with the sender as recvonly (if transceiver.direction is sendrecv) or as inactive (if transceiver.direction is sendonly).
+        + The sender's track is cleared, and the sender stops sending.
+        + Future calls to createOffer will mark the "m=" section associated with the sender as recvonly (if transceiver.direction is sendrecv) or as inactive (if transceiver.direction is sendonly).
     - RtpTransceiver
-          + RtpTransceivers allow the application to control the RTP media associated with one "m=" section.
-          + Each RtpTransceiver has an RtpSender and an RtpReceiver, which an application can use to control the sending and receiving of RTP media.
-          + The application may also modify the RtpTransceiver directly, for instance, by stopping it.
-          + RtpTransceivers can be created explicitly by the application or implicitly by calling setRemoteDescription with an offer that adds new "m=" sections.
+        + RtpTransceivers allow the application to control the RTP media associated with one "m=" section.
+        + Each RtpTransceiver has an RtpSender and an RtpReceiver, which an application can use to control the sending and receiving of RTP media.
+        + The application may also modify the RtpTransceiver directly, for instance, by stopping it.
+        + RtpTransceivers can be created explicitly by the application or implicitly by calling setRemoteDescription with an offer that adds new "m=" sections.
     - RtpTransceiver.stop
-          + The stop method stops an RtpTransceiver.
-          + This will cause future calls to createOffer to generate a zero port for the associated "m=" section.
+        + The stop method stops an RtpTransceiver.
+        + This will cause future calls to createOffer to generate a zero port for the associated "m=" section.
     - Subsequent Offers
-          + If any RtpTransceiver has been added and there exists an "m=" section with a zero port in the current local description or the current remote description, that "m=" section MUST be recycled by generating an "m=" section for the added RtpTransceiver as if the "m=" section were being added to the session description (including a new MID value) and placing it at the same index as the "m=" section with a zero port.
-          + If an RtpTransceiver is stopped and is not associated with an "m=" section, an "m=" section MUST NOT be generated for it.
-          + If an RtpTransceiver has been stopped and is associated with an "m=" section, and the "m=" section is not being recycled as described above, an "m=" section MUST be generated for it with the port set to zero and all "a=msid" lines removed.
+        + If any RtpTransceiver has been added and there exists an "m=" section with a zero port in the current local description or the current remote description, that "m=" section MUST be recycled by generating an "m=" section for the added RtpTransceiver as if the "m=" section were being added to the session description (including a new MID value) and placing it at the same index as the "m=" section with a zero port.
+        + If an RtpTransceiver is stopped and is not associated with an "m=" section, an "m=" section MUST NOT be generated for it.
+        + If an RtpTransceiver has been stopped and is associated with an "m=" section, and the "m=" section is not being recycled as described above, an "m=" section MUST be generated for it with the port set to zero and all "a=msid" lines removed.
 
 * [RFC 8830 - WebRTC MediaStream Identification in the Session Description Protocol](https://datatracker.ietf.org/doc/rfc8830/)
     - grouping mechanism for RTP media streams
