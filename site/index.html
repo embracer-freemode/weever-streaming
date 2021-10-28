@@ -100,7 +100,8 @@ window.runPublisher = () => {
     iceServers: [
       {
         urls: "stun:stun.l.google.com:19302"
-      }
+      },
+      // also TURN servers here
     ]
   })
 
@@ -167,7 +168,8 @@ window.runSubscriber = () => {
     iceServers: [
       {
         urls: "stun:stun.l.google.com:19302"
-      }
+      },
+      // also TURN servers here
     ]
   });
 
