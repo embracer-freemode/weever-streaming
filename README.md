@@ -1,7 +1,7 @@
 Horizontal Scaling WebRTC SFU
 ========================================
 
-A WebRTC SFU server aim to be horizontal scalable.
+A WebRTC SFU (Selective Forwarding Unit) server aim to be horizontal scalable.
 
 You can view the table of content on GitHub like this:
 ![github-toc](https://user-images.githubusercontent.com/2716047/132623287-c276e4a0-19a8-44a5-bbdb-41e1cdc432e1.gif)
@@ -76,9 +76,42 @@ WebRTC specs
 * [RFC 8826 - Security Considerations for WebRTC](https://datatracker.ietf.org/doc/rfc8826/)
 * [RFC 8827 - WebRTC Security Architecture](https://datatracker.ietf.org/doc/rfc8827/)
 * [RFC 8828 - WebRTC IP Address Handling Requirements](https://datatracker.ietf.org/doc/rfc8828/)
+* [RFC 8829 - JavaScript Session Establishment Protocol (JSEP)](https://datatracker.ietf.org/doc/rfc8829/)
+    - PeerConnection.addTrack
+          + if the PeerConnection is in the "have-remote-offer" state, the track will be attached to the first compatible transceiver that was created by the most recent call to setRemoteDescription and does not have a local track.
+          + Otherwise, a new transceiver will be created
+    - PeerConnection.removeTrack
+          + The sender's track is cleared, and the sender stops sending.
+          + Future calls to createOffer will mark the "m=" section associated with the sender as recvonly (if transceiver.direction is sendrecv) or as inactive (if transceiver.direction is sendonly).
+    - RtpTransceiver
+          + RtpTransceivers allow the application to control the RTP media associated with one "m=" section.
+          + Each RtpTransceiver has an RtpSender and an RtpReceiver, which an application can use to control the sending and receiving of RTP media.
+          + The application may also modify the RtpTransceiver directly, for instance, by stopping it.
+          + RtpTransceivers can be created explicitly by the application or implicitly by calling setRemoteDescription with an offer that adds new "m=" sections.
+    - RtpTransceiver.stop
+          + The stop method stops an RtpTransceiver.
+          + This will cause future calls to createOffer to generate a zero port for the associated "m=" section.
+    - Subsequent Offers
+          + If any RtpTransceiver has been added and there exists an "m=" section with a zero port in the current local description or the current remote description, that "m=" section MUST be recycled by generating an "m=" section for the added RtpTransceiver as if the "m=" section were being added to the session description (including a new MID value) and placing it at the same index as the "m=" section with a zero port.
+          + If an RtpTransceiver is stopped and is not associated with an "m=" section, an "m=" section MUST NOT be generated for it.
+          + If an RtpTransceiver has been stopped and is associated with an "m=" section, and the "m=" section is not being recycled as described above, an "m=" section MUST be generated for it with the port set to zero and all "a=msid" lines removed.
+
 * [RFC 8830 - WebRTC MediaStream Identification in the Session Description Protocol](https://datatracker.ietf.org/doc/rfc8830/)
+    - grouping mechanism for RTP media streams
+    - MediaStreamTrack: unidirectional flow of media data (either audio or video, but not both). One MediaStreamTrack can be present in zero, one, or multiple MediaStreams. (source stream)
+    - MediaStream: assembly of MediaStreamTracks, can be different types.
+    - Media description: a set of fields starting with an "m=" field and terminated by either the next "m=" field or the end of the session description.
+    - each RTP stream is distinguished inside an RTP session by its Synchronization Source (SSRC)
+    - each RTP session is distinguished from all other RTP sessions by being on a different transport association (2 transport assertions if no RTP/RTCP multiplexing)
+    - if multiple media sources are carried in an RTP session, this is signaled using BUNDLE
+    - RTP streams are grouped into RTP sessions and also carry a CNAME
+    - Neither CNAME nor RTP session corresponds to a MediaStream, the association of an RTP stream to MediaStreams need to be explicitly signaled.
+    - MediaStreams identifier (msid) associates RTP streams that are described in separate media descriptions with the right MediaStreams
+    - the value of the "msid" attribute consists of an identifier and an optional "appdata" field
+    - `msid-id [ SP msid-appdata ]`
+    - There may be multiple "msid" attributes in a single media description. This represents the case where a single MediaStreamTrack is present in multiple MediaStreams.
+    - Endpoints can update the associations between RTP streams as expressed by "msid" attributes at any time.
 * [RFC 8831 - WebRTC Data Channels](https://datatracker.ietf.org/doc/rfc8831/)
-    - msid
 * [RFC 8832 - WebRTC Data Channel Establishment Protocol](https://datatracker.ietf.org/doc/rfc8832/)
 * [RFC 8833 - Application-Layer Protocol Negotiation (ALPN) for WebRTC](https://datatracker.ietf.org/doc/rfc8833/)
 * [RFC 8834 - Media Transport and Use of RTP in WebRTC](https://datatracker.ietf.org/doc/rfc8834/)
@@ -187,7 +220,8 @@ Environment prepare
 ------------------------------
 
 Environment dependencies:
-* [NATS server](https://nats.io)
+* [NATS server](https://nats.io) (for distributing media)
+* [Redis](https://redis.io) (for sharing room metadata)
 
 
 Run the program
@@ -270,11 +304,6 @@ Then run:
 cargo tarpaulin -o Html
 ```
 
-Go check the ``tarpaulin-report.html``:
-
-![TODO-UPDATE-test-cov1](https://user-images.githubusercontent.com/2716047/128280082-ddf88c95-b1f8-4d2c-8a52-2cf2ad2c6b74.png)
-![TODO-UPDATE-test-cov2](https://user-images.githubusercontent.com/2716047/128280084-46101db4-615b-4133-9289-73ba0b7060ef.png)
-
 
 Fuzz Test
 ------------------------------
@@ -331,6 +360,21 @@ Code Structure
 Files
 ------------------------------
 
+```sh
+.
+├── .circleci
+│  └── config.yml # CircleCI config
+├── site
+│  └── index.yml  # demo website
+├── Cargo.lock    # Rust package dependencies lock
+├── Cargo.toml    # Rust package dependencies
+├── Dockerfile    # container build setup
+├── README.md
+└── src           # main code
+   ├── cli.rs     # CLI/env options
+   └── lib.rs     # WebRTC & web server
+```
+
 Docs site
 ------------------------------
 
@@ -344,9 +388,19 @@ cargo doc
 Launching Flow in Program
 ------------------------------
 
+When program launches, roughly these steps will happen:
+1. parse CLI args and environment variables
+2. create logger
+3. load SSL certs
+4. create Redis client
+5. create NATS client
+6. run web server
 
-States save/load
+
+States Sharing
 ------------------------------
+
+Curretly, room/publisher/subscriber settings are shared across instances via Redis.
 
 
 
@@ -364,14 +418,74 @@ This project shows that:
 Future Works
 ========================================
 
-* [X] audio codec: Opus
-* [X] video codec: VP8
-* [X] RTP BUNDLE
-* [X] RTCP mux
-* [X] Multistream (1 connnetion for multiple video/audio streams)
-* [X] Datachannel
-* [X] WebRTC Renegotiation
-* [X] case: new publisher join, subscriber can get new streams
-* [X] case: publisher leave, subscriber can know and delete stuffs
-* [X] case: subscriber join in the middle, can get existing publishers' streams
-* [ ] case: publisher leave and rejoin again
+* Media
+    - [X] audio codec: Opus
+    - [X] video codec: VP8
+    - [X] RTP BUNDLE
+    - [X] RTCP mux
+    - [X] Multistream (1 connnetion for multiple video/audio streams pulling)
+    - [X] Datachannel
+    - [X] WebRTC Renegotiation
+    - [ ] ICE restart
+    - [ ] SVC: VP8-SVC
+    - [ ] SVC: AV1-SVC
+    - [ ] Simulcast
+    - [ ] RTX (retransmission) check
+    - [ ] FEC (Forward Error Correction)
+    - [ ] PLI (Picture Loss Indication) control
+    - [ ] FIR (Full Intra Request)
+    - [ ] NACK (Negative Acknowledgement) check
+    - [ ] video codec: H264
+    - [ ] video codec: VP9
+    - [ ] video codec: AV1
+    - [ ] Opus in-band FEC
+    - [ ] Opus DTX (discontinuous transmission)
+    - [ ] RTP Header Extensions check (hdrext)
+    - [ ] Reduced-Size RTCP check (rtcp-rsize)
+    - [ ] BWE (bandwidth estimation) / Congestion Control (goog-remb & transport-cc) check
+    - [ ] bandwidth limitation in SDP
+    - [ ] latency measurement
+    - [ ] E2E (End to End) Encryption
+    - [ ] audio mixing
+
+* Use Cases
+    - [X] new publisher join, existing subscriber can get new streams
+    - [X] publisher leave, existing subscriber can know and delete stuffs
+    - [X] new subscriber join in the middle, can get existing publishers' streams
+    - [X] publisher leave and rejoin again
+    - [X] cover all audio room use cases
+    - [ ] screen share (media add/remove for same publisher)
+    - [ ] cover all video room use cases
+    - [ ] chatting via datachannel
+
+* Horizontal Scale
+    - [X] shared state across instances
+    - [ ] instance killed will cleanup related resource in Redis
+    - [ ] subscriber based scaling mechanism (need to cowork with Helm chart)
+
+* Stability
+    - [ ] unwrap cleanup
+    - [ ] WebRTC spec reading
+    - [ ] more devices test (Windows/MacOS/Linux/Android/iOS with Chrome/Firefox/Safari/Edge)
+
+* Performance Optimization
+    - [ ] WebRTC.rs stack digging
+
+* Monitor
+    - [ ] use spans info to show on Grafana (by room)
+    - [ ] use spans info to show on Grafana (by user)
+
+* Misc
+    - [ ] in-cluster API for publishers list
+    - [ ] in-cluster API for subscribers list
+    - [ ] split user API and internal setting API
+
+* Issues (discover during development or team test)
+    - [ ] publisher rejoin sometime will cause video stucking on subscriber side
+    - [ ] we get some broken audio from time to time
+    - [ ] sometime it needs 10 seconds to become connected (network problem?)
+    - [ ] Safari can't connect
+
+* Refactor
+    - [ ] redesign the room metadata
+    - [ ] redesign the SDP flow
