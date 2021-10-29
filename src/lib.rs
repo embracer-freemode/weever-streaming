@@ -1,6 +1,6 @@
 //! WebRTC SFU with horizontal scale design
 
-use anyhow::{Result, Context, bail};
+use anyhow::{Result, Context, bail, anyhow};
 use async_trait::async_trait;
 use log::{debug, info, warn, error};
 use webrtc::interceptor::registry::Registry;
@@ -40,7 +40,14 @@ use std::pin::Pin;
 use tokio::time::{Duration, timeout};
 use tokio::sync::oneshot;
 use tokio::sync::mpsc;
-use actix_web::{post, web, App, HttpServer, Responder, HttpResponse};
+use actix_web::{
+    post, web,
+    App, HttpServer, HttpResponse, Responder,
+    http::{
+        StatusCode,
+        header,
+    }
+};
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use actix_files::Files;
 use serde::{Deserialize, Serialize};
@@ -731,7 +738,7 @@ async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, offer:
     // Send out the SDP answer via Sender
     if let Some(local_desc) = peer_connection.local_description().await {
         info!("PC send local SDP");
-        answer_tx.send(local_desc.sdp).unwrap();
+        answer_tx.send(local_desc.sdp).map_err(|s| anyhow!(s).context("SDP answer send error"))?;
     } else {
         // TODO: when will this happen?
         warn!("generate local_description failed!");
@@ -1507,7 +1514,7 @@ async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, offer:
     // Output the answer in base64 so we can paste it in browser
     if let Some(local_desc) = peer_connection.local_description().await {
         info!("PC send local SDP");
-        answer_tx.send(local_desc.sdp).unwrap();
+        answer_tx.send(local_desc.sdp).map_err(|s| anyhow!(s).context("SDP answer send error"))?;
     } else {
         // TODO: when will this happen?
         warn!("generate local_description failed!");
@@ -1530,8 +1537,12 @@ async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, offer:
 #[actix_web::main]
 async fn web_main(cli: cli::CliOptions) -> Result<()> {
     // load ssl keys
-    let raw_certs = &mut std::io::BufReader::new(std::fs::File::open(&cli.cert_file).unwrap());
-    let raw_keys = &mut std::io::BufReader::new(std::fs::File::open(&cli.key_file).unwrap());
+    let raw_certs = &mut std::io::BufReader::new(
+        std::fs::File::open(&cli.cert_file).context("can't read SSL cert file")?
+    );
+    let raw_keys = &mut std::io::BufReader::new(
+        std::fs::File::open(&cli.key_file).context("can't read SSL key file")?
+    );
     let cert_chain = certs(raw_certs)
         .context("cert parse error")?
         .iter()
@@ -1549,8 +1560,8 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
         .context("cert setup failed")?;
 
     // Redis
-    let redis_client = redis::Client::open(cli.redis.clone()).unwrap();
-    let conn = redis_client.get_multiplexed_tokio_connection().await.unwrap();
+    let redis_client = redis::Client::open(cli.redis.clone()).context("can't connect to Redis")?;
+    let conn = redis_client.get_multiplexed_tokio_connection().await.context("can't get multiplexed Redis client")?;
     LOCAL_STATE.set_redis(conn);
 
     // NATS
@@ -1558,7 +1569,7 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
     let nats = nats::asynk::connect(&cli.nats).await.context("can't connect to NATS")?;
     LOCAL_STATE.set_nats(nats);
     // run task for listening upcoming commands
-    LOCAL_STATE.listen_on_commands().await;
+    LOCAL_STATE.listen_on_commands().await?;
 
     let url = format!("{}:{}", cli.host, cli.port);
     HttpServer::new(move || {
@@ -1660,19 +1671,19 @@ async fn publish(auth: BearerAuth,
     let (room, id) = path.into_inner();
 
     if id.is_empty() {
-        return HttpResponse::BadRequest().body("id should not be empty");
+        return "id should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return HttpResponse::BadRequest().body("id should be ascii alphanumeric");
+        return "id should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if room.is_empty() {
-        return HttpResponse::BadRequest().body("room should not be empty");
+        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return HttpResponse::BadRequest().body("room should be ascii alphanumeric");
+        return "room should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -1682,31 +1693,49 @@ async fn publish(auth: BearerAuth,
         let token = LOCAL_STATE.get_pub_token(&room, &id).await;
         if let Some(token) = token {
             if token != auth.token() {
-                return HttpResponse::Unauthorized().body("bad token");
+                return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
             }
         } else {
-            return HttpResponse::Unauthorized().body("bad token");
+            return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
         }
     }
 
-    let sdp = String::from_utf8(sdp.to_vec()).unwrap(); // FIXME: no unwrap
+    let sdp = match String::from_utf8(sdp.to_vec()) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("SDP parsed error: {}", e);
+            return "bad SDP".to_string().with_status(StatusCode::BAD_REQUEST);
+        }
+    };
     debug!("pub: auth {} sdp {:.20?}", auth.token(), sdp);
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     // get a time based id to represent following Tokio task for this user
     // if user call it again later
     // we will be able to identify in logs
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
+    let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d,
+        Err(e) => {
+            error!("system time error: {}", e);
+            return "time error".to_string().with_status(StatusCode::INTERNAL_SERVER_ERROR);
+        },
+    }.as_micros();
     let tid = now.wrapping_div(10000) as u16;
 
     tokio::spawn(catch(webrtc_to_nats(cli.get_ref().clone(), room.clone(), id.clone(), sdp, tx, tid)));
     // TODO: timeout
-    let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
+    let sdp_answer = match rx.await {
+        Ok(s) => s,
+        Err(e) => {
+            error!("SDP answer get error: {}", e);
+            return "SDP answer generation error".to_string().with_status(StatusCode::BAD_REQUEST);
+        }
+    };
     debug!("SDP answer: {:.20}", sdp_answer);
-    HttpResponse::Created() // 201
-        .content_type("application/sdp")
-        .append_header(("Location", ""))    // TODO: what's the need?
-        .body(sdp_answer)
+    sdp_answer
+        .with_status(StatusCode::CREATED)       // 201
+        .with_header((header::CONTENT_TYPE, "application/sdp"))
+        .with_header((header::LOCATION, ""))    // TODO: what's the need?
 }
 
 #[post("/sub/{room}/{id}")]
@@ -1717,19 +1746,19 @@ async fn subscribe(auth: BearerAuth,
     let (room, id) = path.into_inner();
 
     if id.is_empty() {
-        return HttpResponse::BadRequest().body("id should not be empty");
+        return "id should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return HttpResponse::BadRequest().body("id should be ascii alphanumeric");
+        return "id should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if room.is_empty() {
-        return HttpResponse::BadRequest().body("room should not be empty");
+        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return HttpResponse::BadRequest().body("room should be ascii alphanumeric");
+        return "room should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -1739,30 +1768,48 @@ async fn subscribe(auth: BearerAuth,
         let token = LOCAL_STATE.get_sub_token(&room, &id).await;
         if let Some(token) = token {
             if token != auth.token() {
-                return HttpResponse::Unauthorized().body("bad token");
+                return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
             }
         } else {
-            return HttpResponse::Unauthorized().body("bad token");
+            return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
         }
     }
 
-    let sdp = String::from_utf8(sdp.to_vec()).unwrap(); // FIXME: no unwrap
-    debug!("sub_all: auth {} sdp {:.20?}", auth.token(), sdp);
+    let sdp = match String::from_utf8(sdp.to_vec()) {
+        Ok(s) => s,
+        Err(e) => {
+            error!("SDP parsed error: {}", e);
+            return "bad SDP".to_string().with_status(StatusCode::BAD_REQUEST);
+        }
+    };
+    debug!("sub: auth {} sdp {:.20?}", auth.token(), sdp);
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     // get a time based id to represent following Tokio task for this user
     // if user call it again later
     // we will be able to identify in logs
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
+    let now = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d,
+        Err(e) => {
+            error!("system time error: {}", e);
+            return "time error".to_string().with_status(StatusCode::INTERNAL_SERVER_ERROR);
+        },
+    }.as_micros();
     let tid = now.wrapping_div(10000) as u16;
 
     tokio::spawn(catch(nats_to_webrtc(cli.get_ref().clone(), room.clone(), id.clone(), sdp, tx, tid)));
-    // TODO: timeout
-    let sdp_answer = rx.await.unwrap();     // FIXME: no unwrap
+    // TODO: timeout for safety
+    let sdp_answer = match rx.await {
+        Ok(s) => s,
+        Err(e) => {
+            error!("SDP answer get error: {}", e);
+            return "SDP answer generation error".to_string().with_status(StatusCode::BAD_REQUEST);
+        }
+    };
     debug!("SDP answer: {:.20}", sdp_answer);
-    HttpResponse::Created() // 201
-        .content_type("application/sdp")
-        .body(sdp_answer)
+    sdp_answer
+        .with_status(StatusCode::CREATED)   // 201
+        .with_header((header::CONTENT_TYPE, "application/sdp"))
 }
 
 async fn catch<F>(future: F)
