@@ -122,9 +122,7 @@ struct Room {
 #[derive(Debug, Default)]
 struct PeerConnetionInfo {
     name: String,
-    // pc: Option<RTCPeerConnection>,
     notify_message: Option<Arc<mpsc::Sender<String>>>,  // TODO: special enum for all the cases
-    // notify_close: ...,
 }
 
 type LocalState = Lazy<RwLock<InternalState>>;
@@ -134,23 +132,23 @@ static LOCAL_STATE: LocalState = Lazy::new(|| Default::default());
 #[async_trait]
 trait SharedState {
     fn set_redis(&self, conn: MultiplexedConnection);
-    fn get_redis(&self) -> MultiplexedConnection;
+    fn get_redis(&self) -> Result<MultiplexedConnection>;
     fn set_nats(&self, nats: nats::asynk::Connection);
-    fn get_nats(&self) -> nats::asynk::Connection;
+    fn get_nats(&self) -> Result<nats::asynk::Connection>;
     async fn listen_on_commands(&self) -> Result<()>;
-    async fn set_pub_token(&self, room: String, user: String, token: String);
-    async fn set_sub_token(&self, room: String, user: String, token: String);
-    async fn get_pub_token(&self, room: &str, user: &str) -> Option<String>;
-    async fn get_sub_token(&self, room: &str, user: &str) -> Option<String>;
-    async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String);
-    async fn get_user_track_to_mime(&self, room: &str) -> HashMap<(String, String), String>;
-    async fn remove_user_track_to_mime(&self, room: &str, user: &str);
+    async fn set_pub_token(&self, room: String, user: String, token: String) -> Result<()>;
+    async fn set_sub_token(&self, room: String, user: String, token: String) -> Result<()>;
+    async fn get_pub_token(&self, room: &str, user: &str) -> Result<String>;
+    async fn get_sub_token(&self, room: &str, user: &str) -> Result<String>;
+    async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) -> Result<()>;
+    async fn get_user_track_to_mime(&self, room: &str) -> Result<HashMap<(String, String), String>>;
+    async fn remove_user_track_to_mime(&self, room: &str, user: &str) -> Result<()>;
     fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>);
 
-    async fn send_pub_join(&self, room: &str, pub_user: &str);
-    async fn on_pub_join(&self, room: &str, pub_user: &str);
-    async fn send_pub_leave(&self, room: &str, pub_user: &str);
-    async fn on_pub_leave(&self, room: &str, pub_user: &str);
+    async fn send_pub_join(&self, room: &str, pub_user: &str) -> Result<()>;
+    async fn on_pub_join(&self, room: &str, pub_user: &str) -> Result<()> ;
+    async fn send_pub_leave(&self, room: &str, pub_user: &str) -> Result<()>;
+    async fn on_pub_leave(&self, room: &str, pub_user: &str) -> Result<()> ;
 
     // fn send_sub_join();
     // fn on_sub_join();
@@ -165,9 +163,9 @@ impl SharedState for LocalState {
         state.redis = Some(conn);
     }
 
-    fn get_redis(&self) -> MultiplexedConnection {
+    fn get_redis(&self) -> Result<MultiplexedConnection> {
         let state = self.read().unwrap();
-        state.redis.as_ref().unwrap().clone()
+        Ok(state.redis.as_ref().context("get Redis client failed")?.clone())
     }
 
     fn set_nats(&self, nats: nats::asynk::Connection) {
@@ -175,13 +173,13 @@ impl SharedState for LocalState {
         state.nats = Some(nats);
     }
 
-    fn get_nats(&self) -> nats::asynk::Connection {
+    fn get_nats(&self) -> Result<nats::asynk::Connection> {
         let state = self.read().unwrap();
-        state.nats.as_ref().unwrap().clone()
+        Ok(state.nats.as_ref().context("get NATS client failed")?.clone())
     }
 
     async fn listen_on_commands(&self) -> Result<()> {
-        let nats = self.get_nats();
+        let nats = self.get_nats().context("get NATS client failed")?;
         // cmd.ROOM
         // e.g. cmd.1234
         let subject = "cmd.*";
@@ -211,7 +209,7 @@ impl SharedState for LocalState {
         Ok(())
     }
 
-    async fn set_pub_token(&self, room: String, user: String, token: String) {
+    async fn set_pub_token(&self, room: String, user: String, token: String) -> Result<()> {
         // local version:
         // let mut state = self.lock().unwrap();
         // let room = state.rooms.entry(room).or_default();
@@ -219,12 +217,13 @@ impl SharedState for LocalState {
         // *pub_token = token;
 
         // redis version:
-        let mut conn = self.get_redis();
+        let mut conn = self.get_redis()?;
         let key = format!("token#pub#{}#{}", room, user);
-        let _: Option<()> = conn.set(key, token).await.unwrap();
+        let _: Option<()> = conn.set(key, token).await.context("Redis set failed")?;
+        Ok(())
     }
 
-    async fn set_sub_token(&self, room: String, user: String, token: String) {
+    async fn set_sub_token(&self, room: String, user: String, token: String) -> Result<()> {
         // local version:
         // let mut state = self.lock().unwrap();
         // let room = state.rooms.entry(room).or_default();
@@ -232,36 +231,37 @@ impl SharedState for LocalState {
         // *sub_token = token;
 
         // redis version:
-        let mut conn = self.get_redis();
+        let mut conn = self.get_redis()?;
         let key = format!("token#sub#{}#{}", room, user);
-        let _: Option<()> = conn.set(key, token).await.unwrap();
+        let _: Option<()> = conn.set(key, token).await.context("Redis set failed")?;
+        Ok(())
     }
 
-    async fn get_pub_token(&self, room: &str, user: &str) -> Option<String> {
+    async fn get_pub_token(&self, room: &str, user: &str) -> Result<String> {
         // local version:
         // let mut state = self.lock().unwrap();
         // let room = state.rooms.entry(room.to_string()).or_default();
         // room.pub_tokens.get(user).cloned()
 
         // redis version:
-        let mut conn = self.get_redis();
+        let mut conn = self.get_redis()?;
         let key = format!("token#pub#{}#{}", room, user);
-        conn.get(key).await.unwrap()
+        Ok(conn.get(&key).await.with_context(|| format!("can't get {} from Redis", key))?)
     }
 
-    async fn get_sub_token(&self, room: &str, user: &str) -> Option<String> {
+    async fn get_sub_token(&self, room: &str, user: &str) -> Result<String> {
         // local version:
         // let mut state = self.lock().unwrap();
         // let room = state.rooms.entry(room.to_string()).or_default();
         // room.sub_tokens.get(user).cloned()
 
         // redis version:
-        let mut conn = self.get_redis();
+        let mut conn = self.get_redis()?;
         let key = format!("token#sub#{}#{}", room, user);
-        conn.get(key).await.unwrap()
+        Ok(conn.get(&key).await.with_context(|| format!("can't get {} from Redis", key))?)
     }
 
-    async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) {
+    async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) -> Result<()> {
         // local version:
         // let room_info = self.lock();
         // let mut room_info = room_info.unwrap();
@@ -269,20 +269,21 @@ impl SharedState for LocalState {
         // room_info.user_track_to_mime.insert((user, track), mime);
 
         // redis version:
-        let mut conn = self.get_redis();
+        let mut conn = self.get_redis()?;
         let redis_key = format!("utm#{}", room);
         let hash_key = format!("{}#{}", user, track);
-        let _: Option<()> = conn.hset(redis_key, hash_key, mime).await.unwrap();
+        let _: Option<()> = conn.hset(redis_key, hash_key, mime).await.context("Redis hset failed")?;
+        Ok(())
     }
 
-    async fn get_user_track_to_mime(&self, room: &str) -> HashMap<(String, String), String> {
+    async fn get_user_track_to_mime(&self, room: &str) -> Result<HashMap<(String, String), String>> {
         // local version:
         // self.lock().unwrap().rooms.get(room).unwrap().user_track_to_mime.clone()  // TODO: avoid this clone?
 
         // redis version:
-        let mut conn = self.get_redis();
+        let mut conn = self.get_redis()?;
         let redis_key = format!("utm#{}", room);
-        let utm: HashMap<String, String> = conn.hgetall(redis_key).await.unwrap();
+        let utm: HashMap<String, String> = conn.hgetall(redis_key).await.context("Redis hgetall failed")?;
         let mut result = HashMap::new();
         for (k, v) in utm.into_iter() {
             let mut it = k.splitn(2, "#");
@@ -290,10 +291,10 @@ impl SharedState for LocalState {
             let track = it.next().unwrap();
             result.insert((user.to_string(), track.to_string()), v.to_string());
         }
-        result
+        Ok(result)
     }
 
-    async fn remove_user_track_to_mime(&self, room: &str, user: &str) {
+    async fn remove_user_track_to_mime(&self, room: &str, user: &str) -> Result<()> {
         // local version:
         // let mut tracks = vec![];
         // let mut state = self.lock().unwrap();
@@ -309,15 +310,16 @@ impl SharedState for LocalState {
         // }
 
         // redis version:
-        let mut conn = self.get_redis();
+        let mut conn = self.get_redis()?;
         let redis_key = &format!("utm#{}", room);
-        let user_track_to_mime = self.get_user_track_to_mime(room).await;
+        let user_track_to_mime = self.get_user_track_to_mime(room).await.context("get user track to mime failed")?;
         for ((pub_user, track_id), _) in user_track_to_mime.iter() {
             if pub_user == &user {
                 let hash_key = format!("{}#{}", user, track_id);
-                let _: Option<()> = conn.hdel(redis_key, hash_key).await.unwrap();
+                let _: Option<()> = conn.hdel(redis_key, hash_key).await.context("Redis hdel failed")?;
             }
         }
+        Ok(())
     }
 
     fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>) {
@@ -328,48 +330,52 @@ impl SharedState for LocalState {
         user.notify_message = Some(Arc::new(sender.clone()));
     }
 
-    async fn send_pub_join(&self, room: &str, pub_user: &str) {
+    async fn send_pub_join(&self, room: &str, pub_user: &str) -> Result<()> {
         let subject = format!("cmd.{}", room);
         let msg = format!("PUB_JOIN {}", pub_user);
-        let nats = self.get_nats();
-        nats.publish(&subject, msg).await.unwrap();
+        let nats = self.get_nats().context("get NATS client failed")?;
+        nats.publish(&subject, msg).await.context("publish PUB_JOIN to NATS failed")?;
+        Ok(())
     }
 
-    async fn on_pub_join(&self, room: &str, pub_user: &str) {
+    async fn on_pub_join(&self, room: &str, pub_user: &str) -> Result<()> {
         let subs = {
             let state = self.read().unwrap();
             let room = match state.rooms.get(room) {
                 Some(room) => room,
-                None => return,
+                None => return Ok(()),
             };
             room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
         };
         for sub in subs {
             // TODO: special enum for all the cases
-            sub.send(format!("PUB_JOIN {}", pub_user)).await.unwrap();
+            sub.send(format!("PUB_JOIN {}", pub_user)).await.context("send PUB_JOIN to mpsc Sender failed")?;
         }
+        Ok(())
     }
 
-    async fn send_pub_leave(&self, room: &str, pub_user: &str) {
+    async fn send_pub_leave(&self, room: &str, pub_user: &str) -> Result<()> {
         let subject = format!("cmd.{}", room);
         let msg = format!("PUB_LEFT {}", pub_user);
-        let nats = self.get_nats();
-        nats.publish(&subject, msg).await.unwrap();
+        let nats = self.get_nats().context("get NATS client failed")?;
+        nats.publish(&subject, msg).await.context("publish PUB_LEFT to NATS failed")?;
+        Ok(())
     }
 
-    async fn on_pub_leave(&self, room: &str, pub_user: &str) {
+    async fn on_pub_leave(&self, room: &str, pub_user: &str) -> Result<()> {
         let subs = {
             let state = self.read().unwrap();
             let room = match state.rooms.get(room) {
                 Some(room) => room,
-                None => return,
+                None => return Ok(()),
             };
             room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
         };
         for sub in subs {
             // TODO: special enum for all the cases
-            sub.send(format!("PUB_LEFT {}", pub_user)).await.unwrap();
+            sub.send(format!("PUB_LEFT {}", pub_user)).await.context("send PUB_LEFT to mpsc Sender failed")?;
         }
+        Ok(())
     }
 }
 
@@ -401,7 +407,7 @@ impl PublisherDetails {
     async fn create_pc(stun: String,
                        turn: Option<String>,
                        turn_username: Option<String>,
-                       turn_password: Option<String>) -> Result<RTCPeerConnection, webrtc::Error> {
+                       turn_password: Option<String>) -> Result<RTCPeerConnection> {
         // Create a MediaEngine object to configure the supported codec
         info!("creating MediaEngine");
         let mut m = MediaEngine::default();
@@ -464,8 +470,8 @@ impl PublisherDetails {
             }
         );
         if let Some(turn) = turn {
-            let username = turn_username.unwrap();
-            let password = turn_password.unwrap();
+            let username = turn_username.context("TURN username not preset")?;
+            let password = turn_password.context("TURN password not preset")?;
             servers.push(
                 RTCIceServer {
                     urls: vec![turn],
@@ -482,7 +488,7 @@ impl PublisherDetails {
 
         info!("creating PeerConnection");
         // Create a new RTCPeerConnection
-        api.new_peer_connection(config).await
+        api.new_peer_connection(config).await.map_err(|e| anyhow!(e))
     }
 
     async fn add_transceivers_based_on_sdp(&self, offer: &str) -> Result<()> {
@@ -634,7 +640,13 @@ impl PublisherDetails {
 
             if s == RTCPeerConnectionState::Connected {
                 let now = std::time::SystemTime::now();
-                let duration = now.duration_since(created).unwrap().as_millis();
+                let duration = match now.duration_since(created) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        error!("system time error: {}", e);
+                        Duration::from_secs(42) // fake one for now
+                    },
+                }.as_micros();
                 info!("Peer Connection connected! spent {} ms from created", duration);
             }
 
@@ -672,7 +684,7 @@ impl PublisherDetails {
 async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, tid: u16) -> Result<()> {
     // NATS
     info!("getting NATS");
-    let nc = LOCAL_STATE.get_nats();
+    let nc = LOCAL_STATE.get_nats().context("get NATS client failed")?;;
 
     let peer_connection = Arc::new(PublisherDetails::create_pc(
             cli.stun,
@@ -791,7 +803,7 @@ impl SubscriberDetails {
     async fn create_pc(stun: String,
                        turn: Option<String>,
                        turn_username: Option<String>,
-                       turn_password: Option<String>) -> Result<RTCPeerConnection, webrtc::Error> {
+                       turn_password: Option<String>) -> Result<RTCPeerConnection> {
         info!("creating MediaEngine");
         // Create a MediaEngine object to configure the supported codec
         let mut m = MediaEngine::default();
@@ -853,8 +865,8 @@ impl SubscriberDetails {
             }
         );
         if let Some(turn) = turn {
-            let username = turn_username.unwrap();
-            let password = turn_password.unwrap();
+            let username = turn_username.context("TURN username not preset")?;
+            let password = turn_password.context("TURN password not preset")?;
             servers.push(
                 RTCIceServer {
                     urls: vec![turn],
@@ -871,7 +883,7 @@ impl SubscriberDetails {
 
         info!("creating PeerConnection");
         // Create a new RTCPeerConnection
-        api.new_peer_connection(config).await
+        api.new_peer_connection(config).await.map_err(|e| anyhow!(e))
     }
 
     async fn add_trasceivers_based_on_room(&self) -> Result<()> {
@@ -880,7 +892,7 @@ impl SubscriberDetails {
         // TODO: how to handle video/audio from same publisher and send to different track?
         // HACK_MEDIA.lock().unwrap().push("video".to_string());
 
-        let media = LOCAL_STATE.get_user_track_to_mime(&self.room).await;
+        let media = LOCAL_STATE.get_user_track_to_mime(&self.room).await.context("get user track to mime failed")?;
         for ((user, track_id), mime) in media {
             let app_id = match mime.as_ref() {
                 "video" => "video0",
@@ -982,7 +994,14 @@ impl SubscriberDetails {
 
             if s == RTCPeerConnectionState::Connected {
                 let now = std::time::SystemTime::now();
-                let duration = now.duration_since(created).unwrap().as_millis();
+                let duration = match now.duration_since(created) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        error!("system time error: {}", e);
+                        Duration::from_secs(42) // fake one for now
+                    },
+                }.as_micros();
+
                 info!("Peer Connection connected! spent {} ms from created", duration);
             }
 
@@ -1104,7 +1123,7 @@ impl SubscriberDetails {
                     let msg = timeout(max_time, notify_message.recv()).await;
                     if let Ok(msg) = msg {
                         // we get data before timeout
-                        let media = LOCAL_STATE.get_user_track_to_mime(&room).await;
+                        let media = LOCAL_STATE.get_user_track_to_mime(&room).await.unwrap();
 
                         let msg = msg.unwrap();
 
@@ -1350,24 +1369,9 @@ impl SubscriberDetails {
             }
         }
 
-        // {
         let mut user_media_to_senders = user_media_to_senders.write().unwrap();
         user_media_to_senders.remove(&(left_user.clone(), "video0".to_string()));
         user_media_to_senders.remove(&(left_user.clone(), "audio0".to_string()));
-        // }
-
-        // // debug: pc status
-        // for t in pc.get_transceivers().await {
-        //     info!("t: mid {} kind {}", t.mid().await, t.kind());
-        //     if let Some(rtp_sender) = t.sender().await {
-        //         info!("t: mid {} kind {}: sender {:?}",
-        //               t.mid().await, t.kind(), rtp_sender.get_parameters().await.rtp_parameters);
-        //     }
-        //     if let Some(rtp_receiver) = t.receiver().await {
-        //         info!("t: mid {} kind {}: receiver {:?}",
-        //               t.mid().await, t.kind(), rtp_receiver.kind());
-        //     }
-        // }
     }
 
     async fn send_data(dc: Arc<RTCDataChannel>, msg: String) -> Result<usize, webrtc::Error> {
@@ -1447,7 +1451,7 @@ async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, offer:
 
     // NATS
     info!("getting NATS");
-    let nc = LOCAL_STATE.get_nats();
+    let nc = LOCAL_STATE.get_nats().context("get NATS client failed")?;
     let peer_connection = Arc::new(SubscriberDetails::create_pc(
             cli.stun,
             cli.turn,
@@ -1691,7 +1695,7 @@ async fn publish(auth: BearerAuth,
     // token verification
     {
         let token = LOCAL_STATE.get_pub_token(&room, &id).await;
-        if let Some(token) = token {
+        if let Ok(token) = token {
             if token != auth.token() {
                 return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
             }
@@ -1766,7 +1770,7 @@ async fn subscribe(auth: BearerAuth,
     // token verification
     {
         let token = LOCAL_STATE.get_sub_token(&room, &id).await;
-        if let Some(token) = token {
+        if let Ok(token) = token {
             if token != auth.token() {
                 return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
             }
