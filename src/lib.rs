@@ -45,13 +45,13 @@ use webrtc::{
     rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication,
 };
 use std::sync::Arc;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use tokio::time::{Duration, timeout};
 use tokio::sync::oneshot;
 use tokio::sync::mpsc;
 use actix_web::{
-    post, web,
+    post, get, web,
     App, HttpServer, Responder,
     http::{
         StatusCode,
@@ -154,6 +154,8 @@ trait SharedState {
     async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) -> Result<()>;
     async fn get_user_track_to_mime(&self, room: &str) -> Result<HashMap<(String, String), String>>;
     async fn remove_user_track_to_mime(&self, room: &str, user: &str) -> Result<()>;
+    async fn list_publishers(&self, room: String) -> Result<HashSet<String>>;
+    async fn list_subscribers(&self, room: String) -> Result<HashSet<String>>;
     fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>);
 
     async fn send_pub_join(&self, room: &str, pub_user: &str) -> Result<()>;
@@ -331,6 +333,24 @@ impl SharedState for LocalState {
             }
         }
         Ok(())
+    }
+
+    async fn list_publishers(&self, room: String) -> Result<HashSet<String>> {
+        // TODO: more efficent implementation
+        let mut conn = self.get_redis()?;
+        let redis_key = format!("utm#{}", room);
+        let utm: HashMap<String, String> = conn.hgetall(redis_key).await.context("Redis hgetall failed")?;
+        let mut result = HashSet::new();
+        for (k, _) in utm.into_iter() {
+            let mut it = k.splitn(2, "#");
+            let user = it.next().unwrap();
+            result.insert(user.to_string());
+        }
+        Ok(result)
+    }
+
+    async fn list_subscribers(&self, room: String) -> Result<HashSet<String>> {
+        todo!()
     }
 
     fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>) {
@@ -1598,6 +1618,7 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .service(create_sub)
                 .service(publish)
                 .service(subscribe)
+                .service(list_pub)
         })
         .bind_rustls(url, config)?
         .run()
@@ -1825,6 +1846,30 @@ async fn subscribe(auth: BearerAuth,
     sdp_answer
         .with_status(StatusCode::CREATED)   // 201
         .with_header((header::CONTENT_TYPE, "application/sdp"))
+}
+
+/// List publishers in specific room
+#[get("/list/pub/{room}")]
+async fn list_pub(path: web::Path<String>) -> impl Responder {
+    let room = path.into_inner();
+
+    if room.is_empty() {
+        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
+    if !room.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return "room should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
+    // TODO: auth? we check nothing for now
+
+    info!("listing publishers for room {}", room);
+
+    LOCAL_STATE.list_publishers(room).await.unwrap_or_default()
+        .into_iter()
+        .reduce(|s, p| s + "," + &p)
+        .unwrap_or_default()
+        .with_status(StatusCode::OK)
 }
 
 async fn catch<F>(future: F)

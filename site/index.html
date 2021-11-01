@@ -38,6 +38,8 @@ window.createPublisher = () => {
 </script>
 <hr>
 
+<!-- ---------- -->
+
 <h2>Create subscriber (per subscriber security token setting for pulling streams)</h2>
 (this will only be called from other in-cluster service for settings)<br/>
 room: <input id="create_sub_room" type="text"></input><br/>
@@ -77,6 +79,8 @@ window.createSubscriber = () => {
 }
 </script>
 <hr>
+
+<!-- ---------- -->
 
 <h2>Run Publisher</h2>
 room: <input id="run_pub_room" type="text"></input><br/>
@@ -143,6 +147,8 @@ window.runPublisher = () => {
 }
 </script>
 <hr>
+
+<!-- ---------- -->
 
 <h2>Run Sublisher</h2>
 room: <input id="run_sub_room" type="text"></input><br/>
@@ -385,3 +391,31 @@ video {
     max-height: 200;
 }
 </style>
+<hr>
+
+<!-- ---------- -->
+
+<h2>List Publishers</h2>
+room: <input id="list_pubs_room" type="text"></input><br/>
+<button onclick="window.listPublishers()">List Publishers</button><br/><br/>
+Logs:<br/>
+<div id="list_pubs_log"></div>
+<script>
+window.listPublishers = () => {
+  let log = msg => {
+    document.getElementById("list_pubs_log").innerHTML += msg + "<br>"
+  }
+
+  let room = document.getElementById("list_pubs_room").value;
+
+  fetch(`/list/pub/${room}`, {
+    method: "GET",
+  }).then(res => {
+    log(`Request complete! URL ${res.url} status ${res.status}`);
+    res.text().then(function(answer) {
+      log(answer);
+    })
+  });
+}
+</script>
+<hr>
