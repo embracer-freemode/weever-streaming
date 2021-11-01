@@ -419,3 +419,30 @@ window.listPublishers = () => {
 }
 </script>
 <hr>
+
+<!-- ---------- -->
+
+<h2>List Subscribers</h2>
+room: <input id="list_subs_room" type="text"></input><br/>
+<button onclick="window.listSubscribers()">List Subscribers</button><br/><br/>
+Logs:<br/>
+<div id="list_subs_log"></div>
+<script>
+window.listSubscribers = () => {
+  let log = msg => {
+    document.getElementById("list_subs_log").innerHTML += msg + "<br>"
+  }
+
+  let room = document.getElementById("list_subs_room").value;
+
+  fetch(`/list/sub/${room}`, {
+    method: "GET",
+  }).then(res => {
+    log(`Request complete! URL ${res.url} status ${res.status}`);
+    res.text().then(function(answer) {
+      log(answer);
+    })
+  });
+}
+</script>
+<hr>

@@ -154,8 +154,12 @@ trait SharedState {
     async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) -> Result<()>;
     async fn get_user_track_to_mime(&self, room: &str) -> Result<HashMap<(String, String), String>>;
     async fn remove_user_track_to_mime(&self, room: &str, user: &str) -> Result<()>;
-    async fn list_publishers(&self, room: String) -> Result<HashSet<String>>;
-    async fn list_subscribers(&self, room: String) -> Result<HashSet<String>>;
+    async fn add_publisher(&self, room: &str, user: &str) -> Result<()>;
+    async fn remove_publisher(&self, room: &str, user: &str) -> Result<()>;
+    async fn list_publishers(&self, room: &str) -> Result<HashSet<String>>;
+    async fn add_subscriber(&self, room: &str, user: &str) -> Result<()>;
+    async fn remove_subscriber(&self, room: &str, user: &str) -> Result<()>;
+    async fn list_subscribers(&self, room: &str) -> Result<HashSet<String>>;
     fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>);
 
     async fn send_pub_join(&self, room: &str, pub_user: &str) -> Result<()>;
@@ -335,22 +339,46 @@ impl SharedState for LocalState {
         Ok(())
     }
 
-    async fn list_publishers(&self, room: String) -> Result<HashSet<String>> {
-        // TODO: more efficent implementation
+    async fn add_publisher(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
-        let redis_key = format!("utm#{}", room);
-        let utm: HashMap<String, String> = conn.hgetall(redis_key).await.context("Redis hgetall failed")?;
-        let mut result = HashSet::new();
-        for (k, _) in utm.into_iter() {
-            let mut it = k.splitn(2, "#");
-            let user = it.next().unwrap();
-            result.insert(user.to_string());
-        }
+        let redis_key = format!("room#{}#pub_list", room);
+        let _: Option<()> = conn.sadd(redis_key, user).await.context("Redis sadd failed")?;
+        Ok(())
+    }
+
+    async fn remove_publisher(&self, room: &str, user: &str) -> Result<()> {
+        let mut conn = self.get_redis()?;
+        let redis_key = format!("room#{}#pub_list", room);
+        let _: Option<()> = conn.srem(redis_key, user).await.context("Redis sadd failed")?;
+        Ok(())
+    }
+
+    async fn list_publishers(&self, room: &str) -> Result<HashSet<String>> {
+        let mut conn = self.get_redis()?;
+        let redis_key = format!("room#{}#pub_list", room);
+        let result: HashSet<String> = conn.smembers(redis_key).await.context("Redis smembers failed")?;
         Ok(result)
     }
 
-    async fn list_subscribers(&self, room: String) -> Result<HashSet<String>> {
-        todo!()
+    async fn add_subscriber(&self, room: &str, user: &str) -> Result<()> {
+        let mut conn = self.get_redis()?;
+        let redis_key = format!("room#{}#sub_list", room);
+        let _: Option<()> = conn.sadd(redis_key, user).await.context("Redis sadd failed")?;
+        Ok(())
+    }
+
+    async fn remove_subscriber(&self, room: &str, user: &str) -> Result<()> {
+        let mut conn = self.get_redis()?;
+        let redis_key = format!("room#{}#sub_list", room);
+        let _: Option<()> = conn.srem(redis_key, user).await.context("Redis sadd failed")?;
+        Ok(())
+    }
+
+    async fn list_subscribers(&self, room: &str) -> Result<HashSet<String>> {
+        let mut conn = self.get_redis()?;
+        let redis_key = format!("room#{}#sub_list", room);
+        let result: HashSet<String> = conn.smembers(redis_key).await.context("Redis smembers failed")?;
+        Ok(result)
     }
 
     fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>) {
@@ -663,9 +691,14 @@ impl PublisherDetails {
 
                 notify_close.notify_waiters();
 
-                // tell subscribers a new publisher just leave
-                // ask subscribers to renegotiation
-                return Self::notify_subs_for_leave(room.clone(), user.clone());
+                let room = room.clone();
+                let user = user.clone();
+                return Box::pin(async move {
+                    // tell subscribers a new publisher just leave
+                    // ask subscribers to renegotiation
+                    catch(Self::notify_subs_for_leave(&room, &user)).await;
+                    catch(LOCAL_STATE.remove_publisher(&room, &user)).await;
+                }.instrument(tracing::Span::current()));
                 // TODO: make sure we will cleanup related stuffs
             }
 
@@ -679,6 +712,12 @@ impl PublisherDetails {
                     },
                 }.as_micros();
                 info!("Peer Connection connected! spent {} ms from created", duration);
+
+                let room = room.clone();
+                let user = user.clone();
+                return Box::pin(async move {
+                    catch(LOCAL_STATE.add_publisher(&room, &user)).await;
+                }.instrument(tracing::Span::current()));
             }
 
             Box::pin(async {})
@@ -693,18 +732,13 @@ impl PublisherDetails {
     }
 
     /// tell subscribers a new publisher just leave
-    fn notify_subs_for_leave(room: String, user: String) -> Pin<Box<impl std::future::Future<Output = ()>>> {
-        return Box::pin(async move {
-            info!("notify subscribers for publisher leave");
-
-            let room = room.clone();   // TODO: avoid this?
-            let user = user.clone();   // TODO: avoid this?
-
-            // remove from global state
-            // TODO: better mechanism
-            catch(LOCAL_STATE.remove_user_track_to_mime(&room, &user)).await;
-            catch(LOCAL_STATE.send_pub_leave(&room, &user)).await;
-        }.instrument(tracing::Span::current()));
+    async fn notify_subs_for_leave(room: &str, user: &str) -> Result<()> {
+        info!("notify subscribers for publisher leave");
+        // remove from global state
+        // TODO: better mechanism
+        catch(LOCAL_STATE.remove_user_track_to_mime(&room, &user)).await;
+        catch(LOCAL_STATE.send_pub_leave(&room, &user)).await;
+        Ok(())
     }
 }
 
@@ -1008,6 +1042,8 @@ impl SubscriberDetails {
         let span = tracing::Span::current();
         let notify_close = self.notify_close.clone();
         let created = self.created.clone();
+        let room = self.room.clone();
+        let user = self.user.clone();
         Box::new(move |s: RTCPeerConnectionState| {
             let _enter = span.enter();  // populate user & room info in following logs
             info!("PeerConnection State has changed: {}", s);
@@ -1021,6 +1057,12 @@ impl SubscriberDetails {
 
             if s == RTCPeerConnectionState::Disconnected {
                 notify_close.notify_waiters();
+
+                let room = room.clone();
+                let user = user.clone();
+                return Box::pin(async move {
+                    catch(LOCAL_STATE.remove_subscriber(&room, &user)).await;
+                }.instrument(tracing::Span::current()));
             }
 
             if s == RTCPeerConnectionState::Connected {
@@ -1034,6 +1076,12 @@ impl SubscriberDetails {
                 }.as_micros();
 
                 info!("Peer Connection connected! spent {} ms from created", duration);
+
+                let room = room.clone();
+                let user = user.clone();
+                return Box::pin(async move {
+                    catch(LOCAL_STATE.add_subscriber(&room, &user)).await;
+                }.instrument(tracing::Span::current()));
             }
 
             Box::pin(async {})
@@ -1619,6 +1667,7 @@ async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .service(publish)
                 .service(subscribe)
                 .service(list_pub)
+                .service(list_sub)
         })
         .bind_rustls(url, config)?
         .run()
@@ -1865,7 +1914,31 @@ async fn list_pub(path: web::Path<String>) -> impl Responder {
 
     info!("listing publishers for room {}", room);
 
-    LOCAL_STATE.list_publishers(room).await.unwrap_or_default()
+    LOCAL_STATE.list_publishers(&room).await.unwrap_or_default()
+        .into_iter()
+        .reduce(|s, p| s + "," + &p)
+        .unwrap_or_default()
+        .with_status(StatusCode::OK)
+}
+
+/// List subscribers in specific room
+#[get("/list/sub/{room}")]
+async fn list_sub(path: web::Path<String>) -> impl Responder {
+    let room = path.into_inner();
+
+    if room.is_empty() {
+        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
+    if !room.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return "room should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
+    // TODO: auth? we check nothing for now
+
+    info!("listing subscribers for room {}", room);
+
+    LOCAL_STATE.list_subscribers(&room).await.unwrap_or_default()
         .into_iter()
         .reduce(|s, p| s + "," + &p)
         .unwrap_or_default()
