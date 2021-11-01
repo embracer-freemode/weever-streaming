@@ -3,36 +3,46 @@
 use anyhow::{Result, Context, bail, anyhow};
 use async_trait::async_trait;
 use log::{debug, info, warn, error};
-use webrtc::interceptor::registry::Registry;
-use webrtc::rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication;
-use webrtc::api::interceptor_registry::register_default_interceptors;
-use webrtc::api::media_engine::{MediaEngine, MIME_TYPE_OPUS, MIME_TYPE_VP8};
-use webrtc::api::APIBuilder;
-use webrtc::media::rtp::rtp_codec::{RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType};
-use webrtc::media::rtp::rtp_receiver::RTCRtpReceiver;
-use webrtc::media::rtp::rtp_sender::RTCRtpSender;
-use webrtc::media::track::track_remote::TrackRemote;
-use webrtc::media::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
-use webrtc::media::track::track_local::{TrackLocal, TrackLocalWriter};
-use webrtc::peer::peer_connection::RTCPeerConnection;
-use webrtc::peer::peer_connection::{
-    OnTrackHdlrFn,
-    OnICEConnectionStateChangeHdlrFn,
-    OnPeerConnectionStateChangeHdlrFn,
-    OnDataChannelHdlrFn,
-    OnNegotiationNeededHdlrFn,
-};
-use webrtc::peer::configuration::RTCConfiguration;
-use webrtc::peer::ice::ice_connection_state::RTCIceConnectionState;
-use webrtc::peer::ice::ice_server::RTCIceServer;
-use webrtc::peer::peer_connection_state::RTCPeerConnectionState;
-use webrtc::peer::sdp::session_description::RTCSessionDescription;
-use webrtc::peer::sdp::sdp_type::RTCSdpType;
-use webrtc::data::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::data::data_channel::RTCDataChannel;
-use webrtc::data::data_channel::{
-    OnMessageHdlrFn,
-    OnOpenHdlrFn,
+use webrtc::{
+    api::{
+        APIBuilder,
+        interceptor_registry::register_default_interceptors,
+        media_engine::{MediaEngine, MIME_TYPE_OPUS, MIME_TYPE_VP8},
+    },
+    interceptor::registry::Registry,
+    peer_connection::{
+        RTCPeerConnection,
+        OnTrackHdlrFn,
+        OnICEConnectionStateChangeHdlrFn,
+        OnPeerConnectionStateChangeHdlrFn,
+        OnDataChannelHdlrFn,
+        OnNegotiationNeededHdlrFn,
+        sdp::session_description::RTCSessionDescription,
+        sdp::sdp_type::RTCSdpType,
+        configuration::RTCConfiguration,
+        peer_connection_state::RTCPeerConnectionState,
+    },
+    ice_transport::{
+        ice_connection_state::RTCIceConnectionState,
+        ice_server::RTCIceServer,
+    },
+    rtp_transceiver::{
+        rtp_codec::{RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType},
+        rtp_receiver::RTCRtpReceiver,
+        rtp_sender::RTCRtpSender,
+    },
+    track::{
+        track_local::track_local_static_rtp::TrackLocalStaticRTP,
+        track_local::{TrackLocal, TrackLocalWriter},
+        track_remote::TrackRemote,
+    },
+    data_channel::{
+        data_channel_message::DataChannelMessage,
+        RTCDataChannel,
+        OnMessageHdlrFn,
+        OnOpenHdlrFn,
+    },
+    rtcp::payload_feedbacks::picture_loss_indication::PictureLossIndication,
 };
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -42,7 +52,7 @@ use tokio::sync::oneshot;
 use tokio::sync::mpsc;
 use actix_web::{
     post, web,
-    App, HttpServer, HttpResponse, Responder,
+    App, HttpServer, Responder,
     http::{
         StatusCode,
         header,
@@ -63,6 +73,7 @@ use std::sync::RwLock;
 mod cli;
 
 
+#[allow(dead_code)]
 fn main() -> Result<()> {
     // CLI
     let args = cli::get_args();
@@ -191,10 +202,10 @@ impl SharedState for LocalState {
             info!("internal NATS cmd, room {} msg '{}'", room, msg);
             if msg.starts_with("PUB_LEFT ") {
                 let user = msg.splitn(2, " ").skip(1).next().unwrap();
-                LOCAL_STATE.on_pub_leave(room, user).await;
+                catch(LOCAL_STATE.on_pub_leave(room, user)).await;
             } else if msg.starts_with("PUB_JOIN ") {
                 let user = msg.splitn(2, " ").skip(1).next().unwrap();
-                LOCAL_STATE.on_pub_join(room, user).await;
+                catch(LOCAL_STATE.on_pub_join(room, user)).await;
             }
             Ok(())
         }
@@ -451,7 +462,7 @@ impl PublisherDetails {
         let mut registry = Registry::new();
 
         // Use the default set of Interceptors
-        registry = register_default_interceptors(registry, &mut m)?;
+        registry = register_default_interceptors(registry, &mut m).await?;
 
         // Create the API object with the MediaEngine
         let api = APIBuilder::new()
@@ -513,12 +524,12 @@ impl PublisherDetails {
 
             // TODO: global cache for media count
             if sdp_media.starts_with("video") {
-                LOCAL_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "video".to_string()).await;
+                catch(LOCAL_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "video".to_string())).await;
                 self.pc
                     .add_transceiver_from_kind(RTPCodecType::Video, &[])
                     .await?;
             } else if sdp_media.starts_with("audio") {
-                LOCAL_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "audio".to_string()).await;
+                catch(LOCAL_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "audio".to_string())).await;
                 self.pc
                     .add_transceiver_from_kind(RTPCodecType::Audio, &[])
                     .await?;
@@ -658,7 +669,7 @@ impl PublisherDetails {
     /// ask subscribers to renegotiation
     async fn notify_subs_for_join(&self) {
         info!("notify subscribers for publisher join");
-        LOCAL_STATE.send_pub_join(&self.room, &self.user).await;
+        catch(LOCAL_STATE.send_pub_join(&self.room, &self.user)).await;
     }
 
     /// tell subscribers a new publisher just leave
@@ -671,8 +682,8 @@ impl PublisherDetails {
 
             // remove from global state
             // TODO: better mechanism
-            LOCAL_STATE.remove_user_track_to_mime(&room, &user).await;
-            LOCAL_STATE.send_pub_leave(&room, &user).await;
+            catch(LOCAL_STATE.remove_user_track_to_mime(&room, &user)).await;
+            catch(LOCAL_STATE.send_pub_leave(&room, &user)).await;
         }.instrument(tracing::Span::current()));
     }
 }
@@ -684,7 +695,7 @@ impl PublisherDetails {
 async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, tid: u16) -> Result<()> {
     // NATS
     info!("getting NATS");
-    let nc = LOCAL_STATE.get_nats().context("get NATS client failed")?;;
+    let nc = LOCAL_STATE.get_nats().context("get NATS client failed")?;
 
     let peer_connection = Arc::new(PublisherDetails::create_pc(
             cli.stun,
@@ -846,7 +857,7 @@ impl SubscriberDetails {
         let mut registry = Registry::new();
 
         // Use the default set of Interceptors
-        registry = register_default_interceptors(registry, &mut m)?;
+        registry = register_default_interceptors(registry, &mut m).await?;
 
         // Create the API object with the MediaEngine
         let api = APIBuilder::new()
@@ -1109,13 +1120,12 @@ impl SubscriberDetails {
             info!("Data channel '{}'-'{}' open", dc_label, dc_id);
 
             Box::pin(async move {
-                let mut result = Ok(0);
                 let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
                 let max_time = Duration::from_secs(30);
 
                 // ask for renegotiation immediately after datachannel is connected
                 // TODO: detect if there is media?
-                result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                let mut result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
 
                 while result.is_ok() {
                     // use a timeout to make sure we have chance to leave the waiting task even it's closed
@@ -1223,7 +1233,7 @@ impl SubscriberDetails {
     }
 
     async fn on_pub_join(
-            room: String,
+            _room: String,
             join_user: String,
             pc: Arc<RTCPeerConnection>,
             media: HashMap<(String, String), String>,
@@ -1322,14 +1332,15 @@ impl SubscriberDetails {
 
     }
 
+    #[allow(dead_code)]
     async fn on_pub_leave(
             left_user: String,
-            room: String,
+            _room: String,
             pc: Arc<RTCPeerConnection>,
-            media: HashMap<(String, String), String>,
+            _media: HashMap<(String, String), String>,
             tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
             rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-            user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
+            _user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
             user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>) {
 
         info!("pub leave: {}", left_user);
@@ -1344,10 +1355,10 @@ impl SubscriberDetails {
         }
         for target in remove_targets {
             tracks.write().unwrap().remove(&target);
-            let rtp_sender = {
-                let rtp_senders = rtp_senders.read().unwrap();
-                rtp_senders.get(&target).unwrap().clone()
-            };
+            // let rtp_sender = {
+            //     let rtp_senders = rtp_senders.read().unwrap();
+            //     rtp_senders.get(&target).unwrap().clone()
+            // };
             // remove track from subscriber's PeerConnection
             // pc.remove_track(&rtp_sender).await.unwrap();
             // rtp_sender.stop().await.unwrap();
@@ -1630,7 +1641,7 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
     }
 
     if let Some(token) = params.token.clone() {
-        LOCAL_STATE.set_pub_token(params.room.clone(), params.id.clone(), token).await;
+        catch(LOCAL_STATE.set_pub_token(params.room.clone(), params.id.clone(), token)).await;
     }
 
     "pub set"
@@ -1658,7 +1669,7 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
     }
 
     if let Some(token) = params.token.clone() {
-        LOCAL_STATE.set_sub_token(params.room.clone(), params.id.clone(), token).await;
+        catch(LOCAL_STATE.set_sub_token(params.room.clone(), params.id.clone(), token)).await;
     }
 
     "sub set"
