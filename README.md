@@ -68,7 +68,27 @@ WebRTC specs
 * [W3C - WebRTC Priority Control API](https://www.w3.org/TR/webrtc-priority/)
 * [W3C - IceTransport Extensions for WebRTC](https://w3c.github.io/webrtc-ice/)
 * [W3C - WebRTC 1.0 Interoperability Tests Results](https://w3c.github.io/webrtc-interop-reports/webrtc-pc-report.html)
+* [RFC 5285 - A General Mechanism for RTP Header Extensions](https://datatracker.ietf.org/doc/rfc5285/)
+* [RFC 6386 - VP8 Data Format and Decoding Guide](https://datatracker.ietf.org/doc/rfc6386/)
+* [RFC 6716 - Definition of the Opus Audio Codec](https://datatracker.ietf.org/doc/rfc6716/)
+    - based on LPC (Linear Predictive Coding) & MDCT (Modified Discrete Cosine Transform)
+    - in speech, LPC based (e.g. CELP) code low frequencies more efficiently than transform domain techniques (e.g. MDCT)
+    - The Opus codec includes a number of control parameters that can be changed dynamically during regular operation of the codec, without interrupting the audio stream from the encoder to the decoder.
+    - These parameters only affect the encoder since any impact they have on the bitstream is signaled in-band such that a decoder can decode any Opus stream without any out-of-band signaling.
+    - Any Opus implementation can add or modify these control parameters without affecting interoperability.
+    - Control Parameters
+        + Bitrate (6 ~ 510 kbit/s)
+        + Number of Channels (Mono/Stereo)
+        + Audio Bandwidth
+        + Frame Duration
+        + Complexity (CPU complexity v.s. quality/bitrate)
+        + Packet Loss Resilience
+        + Forward Error Correction (FEC)
+        + Constant/Variable Bitrate
+        + Discontinuous Transmission (DTX) (can reduce the bitrate during silence or background noise)
 * [RFC 7478 - Web Real-Time Communication Use Cases and Requirements](https://datatracker.ietf.org/doc/rfc7478/)
+* [RFC 7587 - RTP Payload Format for the Opus Speech and Audio Codec](https://datatracker.ietf.org/doc/rfc7587/)
+* [RFC 7741 - RTP Payload Format for VP8 Video](https://datatracker.ietf.org/doc/rfc7741/)
 * [RFC 7742 - WebRTC Video Processing and Codec Requirements](https://datatracker.ietf.org/doc/rfc7742/)
 * [RFC 7874 - WebRTC Audio Codec and Processing Requirements](https://datatracker.ietf.org/doc/rfc7874/)
 * [RFC 7875 - Additional WebRTC Audio Codecs for Interoperability](https://datatracker.ietf.org/doc/rfc7875/)
@@ -426,6 +446,8 @@ Future Works
     - [X] Multistream (1 connnetion for multiple video/audio streams pulling)
     - [X] Datachannel
     - [X] WebRTC Renegotiation
+    - [ ] audio codec parameters config
+    - [ ] video codec parameters config
     - [ ] ICE restart
     - [ ] SVC: VP8-SVC
     - [ ] SVC: AV1-SVC
@@ -470,6 +492,7 @@ Future Works
 
 * Performance Optimization
     - [ ] WebRTC.rs stack digging
+    - [ ] don't pull streams for subscriber, if the publisher is with same id
 
 * Monitor
     - [ ] use spans info to show on Grafana (by room)
@@ -479,6 +502,9 @@ Future Works
     - [ ] in-cluster API for publishers list
     - [ ] in-cluster API for subscribers list
     - [ ] split user API and internal setting API
+    - [ ] assign public IP from outside to simplify the ICE? (guarantee connection without TURN?)
+    - [ ] force non-trickle on web
+    - [ ] better TURN servers setup for demo site
 
 * Issues (discover during development or team test)
     - [ ] publisher rejoin sometime will cause video stucking on subscriber side
