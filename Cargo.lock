@@ -1402,9 +1402,9 @@ dependencies = [
 
 [[package]]
 name = "interceptor"
-version = "0.4.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96444996b096af68277a2bbd7928d1bf72d973d942311f54036efdd1d23b531"
+checksum = "dd299322484938ec60fd31d43694fb6a5286f94e566b19a5c7f035572f35612e"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2172,9 +2172,9 @@ dependencies = [
 
 [[package]]
 name = "rtcp"
-version = "0.5.2"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32147942891a952fa118df14a8f9e0b07915577dfde8ca19f77792cf46d90b21"
+checksum = "e1859bf2372b6e750a7ec29ea4a718f3d9f09c47c01a232ef0d3b5842d3f38e7"
 dependencies = [
  "bytes",
  "thiserror",
@@ -2326,11 +2326,12 @@ dependencies = [
 
 [[package]]
 name = "sdp"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5564ad4b3706e07397900a3e03d374003b28818de099aa9058ba1e4621421a43"
+checksum = "37da0b0e028c0b3cdec13e2a83b592f4e9177eee230f20cdf73401572da14956"
 dependencies = [
  "rand 0.8.4",
+ "substring",
  "thiserror",
  "url",
 ]
@@ -2624,6 +2625,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "substring"
+version = "1.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42ee6433ecef213b2e72f587ef64a2f5943e7cd16fbd82dbe8bc07486c534c86"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "subtle"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2790,9 +2800,9 @@ checksum = "cda74da7e1a664f795bb1f8a87ec406fb89a02522cf6e50620d016add6dbbf5c"
 
 [[package]]
 name = "tokio"
-version = "1.12.0"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2c2416fdedca8443ae44b4527de1ea633af61d8f7169ffa6e72c5b53d24efcc"
+checksum = "588b2d10a336da58d877567cd8fb8a14b463e2104910f8132cd054b4b96e29ee"
 dependencies = [
  "autocfg",
  "bytes",
@@ -2932,9 +2942,9 @@ dependencies = [
 
 [[package]]
 name = "turn"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "331781f1b690e688e393ee3e9f80671e36f761dd550bdcd94470231b5f22ff6b"
+checksum = "3642206db0af30d8f81ba603693ef94b4bb6b80c937686f31e41785c388b8f82"
 dependencies = [
  "async-trait",
  "base64",
@@ -3168,13 +3178,10 @@ dependencies = [
 [[package]]
 name = "webrtc"
 version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75ba210443b69381a2c532104fbb127558e44f7821bf916cdf3a7da98c13b75e"
+source = "git+https://github.com/webrtc-rs/webrtc?rev=5bb9820#5bb9820f529090808a0b1703ccc14ef36bedc65a"
 dependencies = [
  "async-trait",
- "base64",
  "bytes",
- "chrono",
  "interceptor",
  "lazy_static",
  "log",
@@ -3207,9 +3214,9 @@ dependencies = [
 
 [[package]]
 name = "webrtc-data"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d78cd17e7952d050cd09b848c6625c803e6413dbfabdc672b0816ca7991790d"
+checksum = "ac9d432afc651c652951b72777fa61463bdec7686178b074f8b932d0cd7cb395"
 dependencies = [
  "bytes",
  "derive_builder",
@@ -3261,9 +3268,9 @@ dependencies = [
 
 [[package]]
 name = "webrtc-ice"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9298df9f8a15af57670d3a16d459514e0e39b32b38c7d1bbd623e9562a6cb0fa"
+checksum = "be648284cb03eecf0f22f442a60b57223091600af5af2a07d083902a1428b62a"
 dependencies = [
  "async-trait",
  "crc",
@@ -3311,9 +3318,9 @@ dependencies = [
 
 [[package]]
 name = "webrtc-sctp"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a85a322b7f7757f3a18c6543b081349d0a977a65f308043482c64c10ddd517aa"
+checksum = "02c626f8311b87b2f46cbcd4b66427d23cc4734a5e46c80f734453025162d97f"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3354,9 +3361,9 @@ dependencies = [
 
 [[package]]
 name = "webrtc-srtp"
-version = "0.7.1"
+version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d54bf19750b911dfd56643aa4f449a0b5c73f1065ad2fb405932eeaef54e0c5"
+checksum = "e48b5f6cd2ee50f8e08f60cf87c87ae2d65ea015b2da35094ab504dedd1c76c6"
 dependencies = [
  "aead 0.4.3",
  "aes 0.7.5",
