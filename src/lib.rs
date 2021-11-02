@@ -456,6 +456,20 @@ impl SharedState for LocalState {
     }
 }
 
+/////////////////////////
+// PeerConnection helper
+/////////////////////////
+
+#[derive(Clone)]
+struct WeakPeerConnection(std::sync::Weak<RTCPeerConnection>);
+
+impl WeakPeerConnection {
+    // Try upgrading a weak reference to a strong one
+    fn upgrade(&self) -> Option<Arc<RTCPeerConnection>> {
+        self.0.upgrade()
+    }
+}
+
 /////////////
 // Publisher
 /////////////
@@ -477,6 +491,11 @@ impl std::ops::Drop for PublisherDetails {
 }
 
 impl PublisherDetails {
+    // Downgrade the strong reference to a weak reference
+    fn pc_downgrade(&self) -> WeakPeerConnection {
+        WeakPeerConnection(Arc::downgrade(&self.pc))
+    }
+
     fn get_nats_subect(&self) -> String {
         format!("rtc.{}.{}", self.room, self.user)
     }
@@ -623,7 +642,7 @@ impl PublisherDetails {
         let span = tracing::Span::current();
 
         let nc = self.nats.clone();
-        let pc = self.pc.clone();
+        let wpc = self.pc_downgrade();
         let subject = self.get_nats_subect();
 
         Box::new(move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
@@ -632,7 +651,7 @@ impl PublisherDetails {
             if let Some(track) = track {
                 // Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
                 let media_ssrc = track.ssrc();
-                Self::spawn_periodic_pli(pc.clone(), media_ssrc);
+                Self::spawn_periodic_pli(wpc.clone(), media_ssrc);
 
                 // push RTP to NATS
                 Self::spawn_rtp_to_nats(subject.clone(), track, nc.clone());
@@ -643,7 +662,7 @@ impl PublisherDetails {
     }
 
     /// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
-    fn spawn_periodic_pli(pc: Arc<RTCPeerConnection>, media_ssrc: u32) {
+    fn spawn_periodic_pli(wpc: WeakPeerConnection, media_ssrc: u32) {
         tokio::spawn(async move {
             let mut result = Ok(0);
             while result.is_ok() {
@@ -652,6 +671,11 @@ impl PublisherDetails {
 
                 tokio::select! {
                     _ = timeout.as_mut() => {
+                        let pc = match wpc.upgrade() {
+                            None => break,
+                            Some(pc) => pc,
+                        };
+
                         result = pc.write_rtcp(&PictureLossIndication{
                                 sender_ssrc: 0,
                                 media_ssrc,
@@ -893,6 +917,11 @@ impl std::ops::Drop for SubscriberDetails {
 }
 
 impl SubscriberDetails {
+    // Downgrade the strong reference to a weak reference
+    fn pc_downgrade(&self) -> WeakPeerConnection {
+        WeakPeerConnection(Arc::downgrade(&self.pc))
+    }
+
     fn get_nats_subect(&self) -> String {
         format!("rtc.{}.*.*.*", self.room)
     }
@@ -1143,7 +1172,7 @@ impl SubscriberDetails {
     fn on_data_channel(&mut self) -> OnDataChannelHdlrFn {
         let span = tracing::Span::current();
 
-        let pc = self.pc.clone();
+        let wpc = self.pc_downgrade();
         let tracks = self.tracks.clone();
         let rtp_senders = self.rtp_senders.clone();
         let notify_message = Arc::new(tokio::sync::Mutex::new(self.notify_receiver.take().unwrap()));
@@ -1166,7 +1195,7 @@ impl SubscriberDetails {
             // channel open handling
             Self::on_data_channel_open(
                 room.clone(),
-                pc.clone(),
+                wpc.clone(),
                 dc,
                 dc_label,
                 dc_id.to_string(),
@@ -1181,7 +1210,7 @@ impl SubscriberDetails {
 
     fn on_data_channel_open(
             room: String,
-            pc: Arc<RTCPeerConnection>,
+            wpc: WeakPeerConnection,
             dc: Arc<RTCDataChannel>,
             dc_label: String,
             dc_id: String,
@@ -1196,7 +1225,7 @@ impl SubscriberDetails {
         Box::pin(async move {
             dc.on_open(Self::on_data_channel_sender(
                     room,
-                    pc.clone(),
+                    wpc.clone(),
                     dc.clone(),
                     dc_label.clone(),
                     dc_id,
@@ -1209,7 +1238,7 @@ impl SubscriberDetails {
 
             // Register text message handling
             dc.on_message(Self::on_data_channel_msg(
-                    pc,
+                    wpc,
                     dc.clone(),
                     dc_label,
                     notify_sender))
@@ -1218,7 +1247,7 @@ impl SubscriberDetails {
     }
 
     fn on_data_channel_sender(room: String,
-                              pc: Arc<RTCPeerConnection>,
+                              wpc: WeakPeerConnection,
                               dc: Arc<RTCDataChannel>,
                               dc_label: String,
                               dc_id: String,
@@ -1235,6 +1264,12 @@ impl SubscriberDetails {
             Box::pin(async move {
                 let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
                 let max_time = Duration::from_secs(30);
+
+                // TODO: move this into the loop?
+                let pc = match wpc.upgrade() {
+                    None => return,
+                    Some(pc) => pc,
+                };
 
                 // ask for renegotiation immediately after datachannel is connected
                 // TODO: detect if there is media?
@@ -1301,11 +1336,16 @@ impl SubscriberDetails {
         })
     }
 
-    fn on_data_channel_msg(pc: Arc<RTCPeerConnection>, dc: Arc<RTCDataChannel>, dc_label: String, notify_sender: mpsc::Sender<String>) -> OnMessageHdlrFn {
+    fn on_data_channel_msg(wpc: WeakPeerConnection, dc: Arc<RTCDataChannel>, dc_label: String, notify_sender: mpsc::Sender<String>) -> OnMessageHdlrFn {
         let span = tracing::Span::current();
         Box::new(move |msg: DataChannelMessage| {
             let _enter = span.enter();  // populate user & room info in following logs
-            let pc = pc.clone();
+
+            let pc = match wpc.upgrade() {
+                None => return Box::pin(async {}),
+                Some(pc) => pc,
+            };
+
             let dc = dc.clone();
             let notify_sender = notify_sender.clone();
 
