@@ -46,6 +46,10 @@ pub struct CliOptions {
     /// SSL key file
     #[clap(long, env, default_value = "key.pem")]
     pub key_file: String,
+
+    /// assign external IP addresses of 1:1 (D)NAT
+    #[clap(long, env)]
+    pub public_ip: Option<String>,
 }
 
 /// parse CLI arguments & load env

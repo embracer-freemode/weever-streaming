@@ -26,6 +26,7 @@ use webrtc::{
     ice_transport::{
         ice_connection_state::RTCIceConnectionState,
         ice_server::RTCIceServer,
+        ice_candidate_type::RTCIceCandidateType,
     },
     rtp_transceiver::{
         rtp_codec::{RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType},
@@ -483,7 +484,8 @@ impl PublisherDetails {
     async fn create_pc(stun: String,
                        turn: Option<String>,
                        turn_username: Option<String>,
-                       turn_password: Option<String>) -> Result<RTCPeerConnection> {
+                       turn_password: Option<String>,
+                       public_ip: Option<String>) -> Result<RTCPeerConnection> {
         // Create a MediaEngine object to configure the supported codec
         info!("creating MediaEngine");
         let mut m = MediaEngine::default();
@@ -535,6 +537,10 @@ impl PublisherDetails {
             Some(Duration::from_secs(6)),   // failed timeout
             Some(Duration::from_secs(1)),   // keep alive interval
         );
+
+        if let Some(ip) = public_ip {
+            setting.set_nat_1to1_ips(vec![ip], RTCIceCandidateType::Host);
+        }
 
         // Create the API object with the MediaEngine
         let api = APIBuilder::new()
@@ -781,6 +787,7 @@ async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, offer:
             cli.turn,
             cli.turn_username,
             cli.turn_password,
+            cli.public_ip,
     ).await.context("create PeerConnection failed")?);
     let publisher = PublisherDetails {
         user: user.clone(),
@@ -893,7 +900,8 @@ impl SubscriberDetails {
     async fn create_pc(stun: String,
                        turn: Option<String>,
                        turn_username: Option<String>,
-                       turn_password: Option<String>) -> Result<RTCPeerConnection> {
+                       turn_password: Option<String>,
+                       public_ip: Option<String>) -> Result<RTCPeerConnection> {
         info!("creating MediaEngine");
         // Create a MediaEngine object to configure the supported codec
         let mut m = MediaEngine::default();
@@ -944,6 +952,10 @@ impl SubscriberDetails {
             Some(Duration::from_secs(6)),   // failed timeout
             Some(Duration::from_secs(1)),   // keep alive interval
         );
+
+        if let Some(ip) = public_ip {
+            setting.set_nat_1to1_ips(vec![ip], RTCIceCandidateType::Host);
+        }
 
         // Create the API object with the MediaEngine
         let api = APIBuilder::new()
@@ -1569,6 +1581,7 @@ async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, offer:
             cli.turn,
             cli.turn_username,
             cli.turn_password,
+            cli.public_ip,
     ).await?);
 
     let mut subscriber = SubscriberDetails {
