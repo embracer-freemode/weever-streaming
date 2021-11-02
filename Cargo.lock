@@ -1316,6 +1316,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
 name = "hmac"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3178,10 +3184,11 @@ dependencies = [
 [[package]]
 name = "webrtc"
 version = "0.2.2"
-source = "git+https://github.com/webrtc-rs/webrtc?rev=5bb9820#5bb9820f529090808a0b1703ccc14ef36bedc65a"
+source = "git+https://github.com/webrtc-rs/webrtc?rev=85ecd5d#85ecd5dd007b056636387fa65a5822670ddb5a94"
 dependencies = [
  "async-trait",
  "bytes",
+ "hex",
  "interceptor",
  "lazy_static",
  "log",
