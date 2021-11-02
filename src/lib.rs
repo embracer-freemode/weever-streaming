@@ -8,6 +8,7 @@ use webrtc::{
         APIBuilder,
         interceptor_registry::register_default_interceptors,
         media_engine::{MediaEngine, MIME_TYPE_OPUS, MIME_TYPE_VP8},
+        setting_engine::SettingEngine,
     },
     interceptor::registry::Registry,
     peer_connection::{
@@ -512,8 +513,16 @@ impl PublisherDetails {
         // Use the default set of Interceptors
         registry = register_default_interceptors(registry, &mut m).await?;
 
+        let mut setting = SettingEngine::default();
+        setting.set_ice_timeouts(
+            Some(Duration::from_secs(3)),   // disconnected timeout
+            Some(Duration::from_secs(6)),   // failed timeout
+            Some(Duration::from_secs(1)),   // keep alive interval
+        );
+
         // Create the API object with the MediaEngine
         let api = APIBuilder::new()
+            .with_setting_engine(setting)
             .with_media_engine(m)
             .with_interceptor_registry(registry)
             .build();
@@ -913,8 +922,16 @@ impl SubscriberDetails {
         // Use the default set of Interceptors
         registry = register_default_interceptors(registry, &mut m).await?;
 
+        let mut setting = SettingEngine::default();
+        setting.set_ice_timeouts(
+            Some(Duration::from_secs(3)),   // disconnected timeout
+            Some(Duration::from_secs(6)),   // failed timeout
+            Some(Duration::from_secs(1)),   // keep alive interval
+        );
+
         // Create the API object with the MediaEngine
         let api = APIBuilder::new()
+            .with_setting_engine(setting)
             .with_media_engine(m)
             .with_interceptor_registry(registry)
             .build();
