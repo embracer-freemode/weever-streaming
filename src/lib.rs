@@ -158,9 +158,11 @@ trait SharedState {
     async fn add_publisher(&self, room: &str, user: &str) -> Result<()>;
     async fn remove_publisher(&self, room: &str, user: &str) -> Result<()>;
     async fn list_publishers(&self, room: &str) -> Result<HashSet<String>>;
+    async fn exist_publisher(&self, room: &str, user: &str) -> Result<bool>;
     async fn add_subscriber(&self, room: &str, user: &str) -> Result<()>;
     async fn remove_subscriber(&self, room: &str, user: &str) -> Result<()>;
     async fn list_subscribers(&self, room: &str) -> Result<HashSet<String>>;
+    async fn exist_subscriber(&self, room: &str, user: &str) -> Result<bool>;
     fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>);
 
     async fn send_pub_join(&self, room: &str, pub_user: &str) -> Result<()>;
@@ -361,6 +363,13 @@ impl SharedState for LocalState {
         Ok(result)
     }
 
+    async fn exist_publisher(&self, room: &str, user: &str) -> Result<bool> {
+        let mut conn = self.get_redis()?;
+        let redis_key = format!("room#{}#pub_list", room);
+        let result: bool = conn.sismember(redis_key, user).await.context("Redis sismember failed")?;
+        Ok(result)
+    }
+
     async fn add_subscriber(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
@@ -379,6 +388,13 @@ impl SharedState for LocalState {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
         let result: HashSet<String> = conn.smembers(redis_key).await.context("Redis smembers failed")?;
+        Ok(result)
+    }
+
+    async fn exist_subscriber(&self, room: &str, user: &str) -> Result<bool> {
+        let mut conn = self.get_redis()?;
+        let redis_key = format!("room#{}#sub_list", room);
+        let result: bool = conn.sismember(redis_key, user).await.context("Redis sismember failed")?;
         Ok(result)
     }
 
@@ -1791,15 +1807,20 @@ async fn publish(auth: BearerAuth,
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
-    {
-        let token = LOCAL_STATE.get_pub_token(&room, &id).await;
-        if let Ok(token) = token {
-            if token != auth.token() {
-                return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
-            }
-        } else {
-            return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
+    let token = LOCAL_STATE.get_pub_token(&room, &id).await;
+    if let Ok(token) = token {
+        if token != auth.token() {
+            return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
         }
+    } else {
+        return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
+    // check if there is another publisher in the room with same id
+    match LOCAL_STATE.exist_publisher(&room, &id).await {
+        Ok(true) => return "duplicate publisher".to_string().with_status(StatusCode::BAD_REQUEST),
+        Err(_) => return "publisher check error".to_string().with_status(StatusCode::BAD_REQUEST),
+        _ => {},
     }
 
     let sdp = match String::from_utf8(sdp.to_vec()) {
@@ -1866,15 +1887,20 @@ async fn subscribe(auth: BearerAuth,
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
-    {
-        let token = LOCAL_STATE.get_sub_token(&room, &id).await;
-        if let Ok(token) = token {
-            if token != auth.token() {
-                return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
-            }
-        } else {
-            return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
+    let token = LOCAL_STATE.get_sub_token(&room, &id).await;
+    if let Ok(token) = token {
+        if token != auth.token() {
+            return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
         }
+    } else {
+        return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
+    // check if there is another publisher in the room with same id
+    match LOCAL_STATE.exist_subscriber(&room, &id).await {
+        Ok(true) => return "duplicate subscriber".to_string().with_status(StatusCode::BAD_REQUEST),
+        Err(_) => return "subscriber check error".to_string().with_status(StatusCode::BAD_REQUEST),
+        _ => {},
     }
 
     let sdp = match String::from_utf8(sdp.to_vec()) {
