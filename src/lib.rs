@@ -735,7 +735,7 @@ impl PublisherDetails {
                         error!("system time error: {}", e);
                         Duration::from_secs(42) // fake one for now
                     },
-                }.as_micros();
+                }.as_millis();
                 info!("Peer Connection connected! spent {} ms from created", duration);
 
                 let room = room.clone();
@@ -1106,7 +1106,7 @@ impl SubscriberDetails {
                         error!("system time error: {}", e);
                         Duration::from_secs(42) // fake one for now
                     },
-                }.as_micros();
+                }.as_millis();
 
                 info!("Peer Connection connected! spent {} ms from created", duration);
 
