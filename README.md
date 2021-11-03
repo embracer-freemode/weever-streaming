@@ -486,23 +486,25 @@ Future Works
     - [ ] subscriber based scaling mechanism (need to cowork with Helm chart)
 
 * Stability
-    - [ ] unwrap cleanup
+    - [X] compiler warnings cleanup
+    - [ ] unwrap usage cleanup
     - [ ] WebRTC spec reading
     - [ ] more devices test (Windows/MacOS/Linux/Android/iOS with Chrome/Firefox/Safari/Edge)
 
 * Performance Optimization
     - [ ] WebRTC.rs stack digging
     - [ ] don't pull streams for subscriber, if the publisher is with same id
+    - [ ] compile with `RUSTFLAGS="-Z sanitizer=leak"` and test, make sure there is no memory leak
 
 * Monitor
     - [ ] use spans info to show on Grafana (by room)
     - [ ] use spans info to show on Grafana (by user)
 
 * Misc
-    - [ ] in-cluster API for publishers list
-    - [ ] in-cluster API for subscribers list
+    - [X] in-cluster API for publishers list
+    - [X] in-cluster API for subscribers list
+    - [X] assign public IP from outside to show on the ICE (via set_nat_1to1_ips)
     - [ ] split user API and internal setting API
-    - [ ] assign public IP from outside to simplify the ICE? (guarantee connection without TURN?)
     - [ ] force non-trickle on web
     - [ ] better TURN servers setup for demo site
 
