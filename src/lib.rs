@@ -558,7 +558,8 @@ impl PublisherDetails {
         );
 
         if let Some(ip) = public_ip {
-            setting.set_nat_1to1_ips(vec![ip], RTCIceCandidateType::Host);
+            // setting.set_nat_1to1_ips(vec![ip], RTCIceCandidateType::Host);
+            setting.set_nat_1to1_ips(vec![ip], RTCIceCandidateType::Srflx);
         }
 
         // Create the API object with the MediaEngine
@@ -571,13 +572,14 @@ impl PublisherDetails {
         // Prepare the configuration
         info!("preparing RTCConfiguration");
         let mut servers = vec![];
-        servers.push(
-            RTCIceServer {
-                // e.g.: stun:stun.l.google.com:19302
-                urls: vec![stun],
-                ..Default::default()
-            }
-        );
+        // disable STUN to try 1 to 1 IP with Srflx for now
+        // servers.push(
+        //     RTCIceServer {
+        //         // e.g.: stun:stun.l.google.com:19302
+        //         urls: vec![stun],
+        //         ..Default::default()
+        //     }
+        // );
         if let Some(turn) = turn {
             let username = turn_username.context("TURN username not preset")?;
             let password = turn_password.context("TURN password not preset")?;
@@ -989,7 +991,8 @@ impl SubscriberDetails {
         );
 
         if let Some(ip) = public_ip {
-            setting.set_nat_1to1_ips(vec![ip], RTCIceCandidateType::Host);
+            // setting.set_nat_1to1_ips(vec![ip], RTCIceCandidateType::Host);
+            setting.set_nat_1to1_ips(vec![ip], RTCIceCandidateType::Srflx);
         }
 
         // Create the API object with the MediaEngine
@@ -1002,13 +1005,14 @@ impl SubscriberDetails {
         info!("preparing RTCConfiguration");
         // Prepare the configuration
         let mut servers = vec![];
-        servers.push(
-            RTCIceServer {
-                // e.g.: stun:stun.l.google.com:19302
-                urls: vec![stun],
-                ..Default::default()
-            }
-        );
+        // disable STUN to try 1 to 1 IP with Srflx for now
+        // servers.push(
+        //     RTCIceServer {
+        //         // e.g.: stun:stun.l.google.com:19302
+        //         urls: vec![stun],
+        //         ..Default::default()
+        //     }
+        // );
         if let Some(turn) = turn {
             let username = turn_username.context("TURN username not preset")?;
             let password = turn_password.context("TURN password not preset")?;
