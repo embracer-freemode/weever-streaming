@@ -1859,15 +1859,16 @@ async fn publish(auth: BearerAuth,
 
     // TODO: verify "Content-Type: application/sdp"
 
-    // token verification
-    let token = LOCAL_STATE.get_pub_token(&room, &id).await;
-    if let Ok(token) = token {
-        if token != auth.token() {
-            return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
-        }
-    } else {
-        return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
-    }
+    // disable auth for easier integration for now
+    // // token verification
+    // let token = LOCAL_STATE.get_pub_token(&room, &id).await;
+    // if let Ok(token) = token {
+    //     if token != auth.token() {
+    //         return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
+    //     }
+    // } else {
+    //     return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
+    // }
 
     // check if there is another publisher in the room with same id
     match LOCAL_STATE.exist_publisher(&room, &id).await {
@@ -1939,15 +1940,16 @@ async fn subscribe(auth: BearerAuth,
 
     // TODO: verify "Content-Type: application/sdp"
 
-    // token verification
-    let token = LOCAL_STATE.get_sub_token(&room, &id).await;
-    if let Ok(token) = token {
-        if token != auth.token() {
-            return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
-        }
-    } else {
-        return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
-    }
+    // disable auth for easier integration for now
+    // // token verification
+    // let token = LOCAL_STATE.get_sub_token(&room, &id).await;
+    // if let Ok(token) = token {
+    //     if token != auth.token() {
+    //         return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
+    //     }
+    // } else {
+    //     return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
+    // }
 
     // check if there is another publisher in the room with same id
     match LOCAL_STATE.exist_subscriber(&room, &id).await {
