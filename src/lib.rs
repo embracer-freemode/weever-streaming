@@ -738,7 +738,13 @@ impl PublisherDetails {
                 // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
                 info!("Peer Connection has gone to failed exiting: Done forwarding");
 
-                // TODO: make sure we will cleanup related stuffs
+                // also do state cleanup here
+                // in case we didn't go through disconnected and become failed directly
+                let room = room.clone();
+                let user = user.clone();
+                return Box::pin(async move {
+                    catch(LOCAL_STATE.remove_publisher(&room, &user)).await;
+                }.instrument(tracing::Span::current()));
             }
 
             if s == RTCPeerConnectionState::Disconnected {
@@ -1126,7 +1132,14 @@ impl SubscriberDetails {
                 // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
                 // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
                 info!("Peer Connection has gone to failed exiting: Done forwarding");
-                // TODO: make sure we cleanup related resource
+
+                // also do state cleanup here
+                // in case we didn't go through disconnected and become failed directly
+                let room = room.clone();
+                let user = user.clone();
+                return Box::pin(async move {
+                    catch(LOCAL_STATE.remove_subscriber(&room, &user)).await;
+                }.instrument(tracing::Span::current()));
             }
 
             if s == RTCPeerConnectionState::Disconnected {
