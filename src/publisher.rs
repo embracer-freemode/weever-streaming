@@ -1,6 +1,11 @@
-use crate::state::{SHARED_STATE, SharedState};
-use crate::helper::catch;
-use crate::cli;
+//! Run as publisher in the room.
+//! We will extract RTP from WebRTC streams and send to NATS.
+
+use crate::{
+    cli,
+    helper::catch,
+    state::{SHARED_STATE, SharedState},
+};
 use anyhow::{Result, Context, anyhow};
 use log::{debug, info, warn, error};
 use webrtc::{
@@ -82,9 +87,6 @@ struct PublisherDetails {
     nats: nats::asynk::Connection,
     notify_close: Arc<tokio::sync::Notify>,
     created: std::time::SystemTime,
-    video_count: u8,
-    audio_count: u8,
-    gen_id_to_app_id: Arc<RwLock<HashMap<String, String>>>,
 }
 
 // for logging only
@@ -109,10 +111,6 @@ impl PublisherDetails {
     // Downgrade the strong reference to a weak reference
     fn pc_downgrade(&self) -> WeakPeerConnection {
         WeakPeerConnection(Arc::downgrade(&self.pc))
-    }
-
-    fn get_nats_subect(&self) -> String {
-        format!("rtc.{}.{}", self.room, self.user)
     }
 
     async fn create_pc(stun: String,
@@ -217,86 +215,14 @@ impl PublisherDetails {
         api.new_peer_connection(config).await.map_err(|e| anyhow!(e))
     }
 
-    async fn add_transceivers_based_on_sdp(&mut self, offer: &str) -> Result<()> {
-        info!("add tranceivers based on SDP offer");
-
-        // TODO: more efficent way?
-        // TODO: limitation for safety?
-        //
-        // Allow us to receive N video/audio tracks based on SDP Offer
-        // sample of SDP line: "m=video 9 UDP/TLS/RTP/SAVPF 96"
-        for sdp_media in offer.rsplit_terminator("m=") {
-            let msid = sdp_media.rsplit_once("msid:");
-            if msid.is_none() {
-                continue;
-            }
-            let (_, msid) = msid.unwrap();
-            let id = msid.split_whitespace().take(2).skip(1).next();
-            if id.is_none() {
-                continue;
-            }
-            let id = id.unwrap();
-
-            // TODO: global cache for media count
-            if sdp_media.starts_with("video") {
-                let app_id = format!("video{}", self.video_count);
-                {
-                    let gen_id_to_app_id = self.gen_id_to_app_id.read().unwrap();
-                    let maybe = gen_id_to_app_id.get(id);
-                    if maybe.is_some() {
-                        continue;
-                    }
-                }
-                self.gen_id_to_app_id.write().unwrap().insert(id.to_string(), app_id.clone());
-                self.video_count += 1;
-                // catch(SHARED_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "video".to_string())).await;
-                catch(SHARED_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), app_id, "video".to_string())).await;
-                self.pc
-                    .add_transceiver_from_kind(RTPCodecType::Video, &[])
-                    .await?;
-            } else if sdp_media.starts_with("audio") {
-                let app_id = format!("audio{}", self.audio_count);
-                {
-                    let gen_id_to_app_id = self.gen_id_to_app_id.read().unwrap();
-                    let maybe = gen_id_to_app_id.get(id);
-                    if maybe.is_some() {
-                        continue;
-                    }
-                }
-                self.gen_id_to_app_id.write().unwrap().insert(id.to_string(), app_id.clone());
-                self.audio_count += 1;
-                // catch(SHARED_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "audio".to_string())).await;
-                catch(SHARED_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), app_id, "audio".to_string())).await;
-                self.pc
-                    .add_transceiver_from_kind(RTPCodecType::Audio, &[])
-                    .await?;
-            }
-        }
-
-        // FIXME: remove this
-        // hardcode an extra video for now
-        // {
-        //     let app_id = format!("video{}", self.video_count);
-        //     // self.gen_id_to_app_id.write().unwrap().insert(id.to_string(), app_id.clone());
-        //     self.video_count += 1;
-        //     // catch(SHARED_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), id.to_string(), "video".to_string())).await;
-        //     catch(SHARED_STATE.add_user_track_to_mime(self.room.clone(), self.user.clone(), app_id, "video".to_string())).await;
-        //     self.pc
-        //         .add_transceiver_from_kind(RTPCodecType::Video, &[])
-        //         .await?;
-        // }
-
-        Ok(())
-    }
-
     /// Handler for incoming streams
     fn on_track(&self) -> OnTrackHdlrFn {
         let span = tracing::Span::current();
 
         let nc = self.nats.clone();
         let wpc = self.pc_downgrade();
-        let subject = self.get_nats_subect();
-        let gen_id_to_app_id = self.gen_id_to_app_id.clone();
+        let user = self.user.clone();
+        let room = self.room.clone();
 
         Box::new(move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
             let _enter = span.enter();  // populate user & room info in following logs
@@ -304,20 +230,49 @@ impl PublisherDetails {
             info!("getting new track");
 
             if let Some(track) = track {
-                // Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
-                let media_ssrc = track.ssrc();
-                Self::spawn_periodic_pli(wpc.clone(), media_ssrc);
-
-                let gen_id_to_app_id = gen_id_to_app_id.clone();
+                let wpc = wpc.clone();
+                let user = user.clone();
+                let room = room.clone();
                 let nc = nc.clone();
-                let subject = subject.clone();
                 return Box::pin(async move {
-                    let id = &track.id().await;
-                    let gen_id_to_app_id = gen_id_to_app_id.read().unwrap();
-                    let app_id = gen_id_to_app_id.get(id.as_str()).unwrap();
+                    let tid = track.tid();
+                    let kind = track.kind().to_string();
+                    let stream_id = track.stream_id().await;
+                    let msid = track.msid().await;
+                    info!("new track: tid {}, kind {}, pt {}, ssrc {}, stream_id {}, msid {}",
+                          tid,
+                          kind,
+                          track.payload_type(),
+                          track.ssrc(),
+                          stream_id,    // the stream_id here generated from browser might be "{xxx}"
+                          msid,         // the msid here generated from browser might be "{xxx} {ooo}"
+                    );
+
+                    // TODO: more meaningful app_id? e.g. video0 or camera0
+                    let app_id = msid.strip_prefix(&stream_id).unwrap_or(&msid).trim();
+                    catch(SHARED_STATE.add_user_track_to_mime(
+                        room.clone(),
+                        user.clone(),
+                        app_id.to_string(),
+                        kind,
+                    )).await;
+
+                    // track's tid is strictly monotonic increasing
+                    // it only goes up and the limit is 256 (u8)
+                    // tid starts with 0
+                    //
+                    // tid 1 means we have 2 streams now (assume it's 1 video and 1 audio)
+                    // let's fire the publisher join notify to all subscribers
+                    if tid == 1 {
+                        Self::notify_subs_for_join(&room, &user).await;
+                    }
+
+                    // Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
+                    let media_ssrc = track.ssrc();
+                    Self::spawn_periodic_pli(wpc.clone(), media_ssrc);
 
                     // push RTP to NATS
-                    Self::spawn_rtp_to_nats(subject.clone(), app_id.to_string(), track, nc.clone());
+                    Self::spawn_rtp_to_nats(room, user, app_id.to_string(), track, nc.clone());
                 });
             }
 
@@ -330,7 +285,7 @@ impl PublisherDetails {
         tokio::spawn(async move {
             let mut result = Ok(0);
             while result.is_ok() {
-                let timeout = tokio::time::sleep(Duration::from_secs(3));
+                let timeout = tokio::time::sleep(Duration::from_secs(2));
                 tokio::pin!(timeout);
 
                 tokio::select! {
@@ -351,20 +306,12 @@ impl PublisherDetails {
         }.instrument(tracing::Span::current()));
     }
 
-    fn spawn_rtp_to_nats(subject: String, app_id: String, track: Arc<TrackRemote>, nats: nats::asynk::Connection) {
+    fn spawn_rtp_to_nats(room: String, user: String, app_id: String, track: Arc<TrackRemote>, nats: nats::asynk::Connection) {
         // push RTP to NATS
         // use ID to disquish streams from same publisher
-        // TODO: can we use SSRC?
         tokio::spawn(async move {
-            // FIXME: the id here generated from browser might be "{...}"
-            let kind = match track.kind() {
-                RTPCodecType::Video => "v",
-                RTPCodecType::Audio => "a",
-                RTPCodecType::Unspecified => "u",
-            };
-            // TODO: replace "track.id()" with more meaningful app id? if browser does not populate meaningful one
-            // let subject = format!("{}.{}.{}", subject, kind, track.id().await);
-            let subject = format!("{}.{}.{}", subject, kind, app_id);
+            let kind = track.kind().to_string();    // video/audio
+            let subject = format!("rtc.{}.{}.{}.{}", room, user, kind, app_id);
             info!("publish to {}", subject);
             let mut b = vec![0u8; 1500];
             while let Ok((n, _)) = track.read(&mut b).await {
@@ -560,9 +507,9 @@ impl PublisherDetails {
 
     /// tell subscribers a new publisher just join
     /// ask subscribers to renegotiation
-    async fn notify_subs_for_join(&self) {
+    async fn notify_subs_for_join(room: &str, user: &str) {
         info!("notify subscribers for publisher join");
-        catch(SHARED_STATE.send_pub_join(&self.room, &self.user)).await;
+        catch(SHARED_STATE.send_pub_join(room, user)).await;
     }
 
     /// tell subscribers a new publisher just leave
@@ -592,23 +539,14 @@ pub async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, of
             cli.turn_password,
             cli.public_ip,
     ).await.context("create PeerConnection failed")?);
-    let mut publisher = PublisherDetails {
+    let publisher = PublisherDetails {
         user: user.clone(),
         room: room.clone(),
         pc: peer_connection.clone(),
         nats: nc.clone(),
         notify_close: Default::default(),
         created: std::time::SystemTime::now(),
-        video_count: 0,
-        audio_count: 0,
-        gen_id_to_app_id: Default::default(),
     };  // TODO: remove clone
-
-    publisher.add_transceivers_based_on_sdp(&offer).await.context("add tranceivers based on SDP failed")?;
-
-    // // FIXME: remove this hack for screen sharing
-    // catch(SHARED_STATE.add_user_track_to_mime(room.clone(), user.clone(), "screen".to_string(), "video".to_string())).await;
-    // publisher.pc.add_transceiver_from_kind(RTPCodecType::Video, &[]).await.unwrap();
 
     // build SDP Offer type
     let mut sdp = RTCSessionDescription::default();
@@ -620,7 +558,6 @@ pub async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, of
     // In your application this is where you would handle/process audio/video
     peer_connection
         .on_track(publisher.on_track())
-        .instrument(info_span!("pub"))
         .await;
 
     // Set the handler for ICE connection state
@@ -641,6 +578,7 @@ pub async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, of
         .await;
 
     // Set the remote SessionDescription
+    // this will trigger tranceivers creation underneath
     info!("PC set remote SDP");
     peer_connection.set_remote_description(offer).await?;
 
@@ -667,8 +605,6 @@ pub async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, of
         // TODO: when will this happen?
         warn!("generate local_description failed!");
     }
-
-    publisher.notify_subs_for_join().await;
 
     // limit a publisher to 3 hours for now
     // after 3 hours, we close the connection
