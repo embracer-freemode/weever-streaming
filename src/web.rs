@@ -1,10 +1,13 @@
-use crate::state::{SharedState, SHARED_STATE};
-use crate::helper::catch;
-use crate::publisher;
-use crate::subscriber;
-use crate::cli;
+use crate::{
+    cli,
+    publisher,
+    subscriber,
+    helper::catch,
+    state::{SharedState, SHARED_STATE},
+};
 use anyhow::{Result, Context, bail};
 use log::{debug, info, error};
+use serde::{Deserialize, Serialize};
 use actix_web::{
     post, get, web,
     App, HttpServer, Responder,
@@ -15,7 +18,6 @@ use actix_web::{
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use actix_files::Files;
-use serde::{Deserialize, Serialize};
 use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 
@@ -79,6 +81,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
         .context("actix web server error")
 }
 
+/// Parameters for creating publisher auth token
 #[derive(Debug, Serialize, Deserialize)]
 struct CreatePubParams {
     room: String,
@@ -86,6 +89,7 @@ struct CreatePubParams {
     token: Option<String>,
 }
 
+/// Parameters for creating subscriber auth token
 #[derive(Debug, Serialize, Deserialize)]
 struct CreateSubParams {
     room: String,
@@ -94,6 +98,7 @@ struct CreateSubParams {
 }
 
 
+/// API for creating publisher
 #[post("/create/pub")]
 async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
     info!("create pub: {:?}", params);
@@ -122,6 +127,7 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
 }
 
 
+/// API for creating subscriber
 #[post("/create/sub")]
 async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
     info!("create sub: {:?}", params);
@@ -150,13 +156,12 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
 }
 
 
-/// WebRTC WHIP compatible (sort of) endpoint for publisher
+/// WebRTC WHIP compatible (sort of) endpoint for running publisher
 #[post("/pub/{room}/{id}")]
 async fn publish(auth: BearerAuth,
                  cli: web::Data<cli::CliOptions>,
                  path: web::Path<(String, String)>,
                  sdp: web::Bytes) -> impl Responder {
-                 // web::Json(sdp): web::Json<RTCSessionDescription>) -> impl Responder {
     let (room, id) = path.into_inner();
 
     if id.is_empty() {
@@ -233,6 +238,7 @@ async fn publish(auth: BearerAuth,
         .with_header((header::LOCATION, ""))    // TODO: what's the need?
 }
 
+/// API for running subscriber
 #[post("/sub/{room}/{id}")]
 async fn subscribe(auth: BearerAuth,
                    cli: web::Data<cli::CliOptions>,

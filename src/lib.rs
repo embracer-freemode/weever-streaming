@@ -13,6 +13,7 @@ mod subscriber;
 mod web;
 
 
+/// entrypoint for whole program
 #[allow(dead_code)]
 fn main() -> Result<()> {
     // CLI

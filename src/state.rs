@@ -1,3 +1,7 @@
+//! Sharing state for whole program.
+//! Currently, we share states across instances via Redis.
+//! We can implement multiple state mechanism as long as it fit the SharedState trait.
+
 use crate::helper::catch;
 use anyhow::{Result, Context};
 use async_trait::async_trait;
@@ -418,4 +422,3 @@ impl SharedState for State {
         Ok(())
     }
 }
-
