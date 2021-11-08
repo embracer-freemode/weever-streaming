@@ -326,9 +326,6 @@ window.runSubscriber = () => {
       return;
     }
 
-    var div;
-    div = document.getElementById(`media-${id}`)
-
     // cache it for later cleanup
     // TODO: is there any API under PeerConnection can do this?
     // TODO: we can only get the track GUID here? any other API?
@@ -336,22 +333,27 @@ window.runSubscriber = () => {
     id_to_track_events[id].push(event);
     console.log(event);                      // TODO: remove this
 
+    var div;
+    div = document.getElementById(`media-${id}`)
     if (div == null) {
       div = document.createElement("div")
       div.id = `media-${id}`
       div.textContent = id
+      document.getElementById("sub_videos").appendChild(div)
     }
 
     // video or audio here
-    let media = document.createElement(event.track.kind)
-
+    var media;
+    media = document.getElementById(`media-${id}-${event.track.id}`)
+    if (media == null) {
+      media = document.createElement(event.track.kind)
+      media.id = `media-${id}-${event.track.kind}-${event.track.id}`
+      div.appendChild(media)
+    }
     // TODO: multiple media streams?
     media.srcObject = event.streams[0]
     media.autoplay = true
     media.controls = true
-
-    div.appendChild(media)
-    document.getElementById("sub_videos").appendChild(div)
   }
 
   sub_pc.createOffer()
