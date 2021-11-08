@@ -46,10 +46,9 @@ use webrtc::{
 };
 use tokio::time::{Duration, timeout};
 use tokio::sync::oneshot;
-use tracing::{Instrument, info_span};
-use std::collections::HashMap;
+use tracing::Instrument;
 use std::pin::Pin;
-use std::sync::{Arc, Weak, RwLock};
+use std::sync::{Arc, Weak};
 
 
 struct Publisher(Arc<Publisher>);
@@ -295,10 +294,10 @@ impl PublisherDetails {
                             Some(pc) => pc,
                         };
 
-                        result = pc.write_rtcp(&PictureLossIndication{
+                        result = pc.write_rtcp(&[Box::new(PictureLossIndication{
                                 sender_ssrc: 0,
                                 media_ssrc,
-                        }).await;
+                        })]).await;
                     }
                 };
             }
