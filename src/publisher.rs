@@ -262,8 +262,17 @@ impl PublisherDetails {
                     //
                     // tid 1 means we have 2 streams now (assume it's 1 video and 1 audio)
                     // let's fire the publisher join notify to all subscribers
-                    if tid == 1 {
-                        Self::notify_subs_for_join(&room, &user).await;
+                    {
+                        let pc = match wpc.upgrade() {
+                            None => return,
+                            Some(pc) => pc,
+                        };
+                        let total = pc.get_transceivers().await.len();
+                        // TODO: make sure only fire once?
+                        if (tid+1) == total {
+                            info!("we got {} active remote tracks now", total);
+                            Self::notify_subs_for_join(&room, &user).await;
+                        }
                     }
 
                     // Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
