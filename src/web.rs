@@ -107,16 +107,16 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
         return "id should not be empty";
     }
 
-    if !params.id.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return "id should be ascii alphanumeric";
+    if !params.id.chars().all(|c| c.is_ascii_graphic()) {
+        return "id should be ascii graphic";
     }
 
     if params.room.is_empty() {
         return "room should not be empty";
     }
 
-    if !params.room.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return "room should be ascii alphanumeric";
+    if !params.room.chars().all(|c| c.is_ascii_graphic()) {
+        return "room should be ascii graphic";
     }
 
     if let Some(token) = params.token.clone() {
@@ -136,16 +136,16 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
         return "id should not be empty";
     }
 
-    if !params.id.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return "id should be ascii alphanumeric";
+    if !params.id.chars().all(|c| c.is_ascii_graphic()) {
+        return "id should be ascii graphic";
     }
 
     if params.room.is_empty() {
         return "room should not be empty";
     }
 
-    if !params.room.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return "room should be ascii alphanumeric";
+    if !params.room.chars().all(|c| c.is_ascii_graphic()) {
+        return "room should be ascii graphic";
     }
 
     if let Some(token) = params.token.clone() {
@@ -168,16 +168,16 @@ async fn publish(auth: BearerAuth,
         return "id should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
-    if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return "id should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
+    if !id.chars().all(|c| c.is_ascii_graphic()) {
+        return "id should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if room.is_empty() {
         return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
-    if !room.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return "room should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
+    if !room.chars().all(|c| c.is_ascii_graphic()) {
+        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -250,16 +250,16 @@ async fn subscribe(auth: BearerAuth,
         return "id should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
-    if !id.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return "id should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
+    if !id.chars().all(|c| c.is_ascii_graphic()) {
+        return "id should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if room.is_empty() {
         return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
-    if !room.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return "room should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
+    if !room.chars().all(|c| c.is_ascii_graphic()) {
+        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -328,8 +328,8 @@ async fn list_pub(path: web::Path<String>) -> impl Responder {
         return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
-    if !room.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return "room should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
+    if !room.chars().all(|c| c.is_ascii_graphic()) {
+        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: auth? we check nothing for now
@@ -352,8 +352,8 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
         return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
-    if !room.chars().all(|c| c.is_ascii_alphanumeric()) {
-        return "room should be ascii alphanumeric".to_string().with_status(StatusCode::BAD_REQUEST);
+    if !room.chars().all(|c| c.is_ascii_graphic()) {
+        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: auth? we check nothing for now
