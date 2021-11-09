@@ -87,7 +87,9 @@ room: <input id="run_pub_room" type="text"></input><br/>
 id: <input id="run_pub_id" type="text"></input><br/>
 token: <input id="run_pub_token" type="text"></input><br/>
 <button onclick="window.runPublisher()">Run Publisher</button><br/><br/>
+<button id="run_pub_screenshare"> Screen Share </button><br />
 <video id="pub_video" width="160" height="120" autoplay muted></video><br />
+<video id="pub_video_screenshare" width="160" height="120" autoplay muted></video><br />
 local offer: <br/><textarea id="pubLocalSessionDescription" readonly="true"></textarea>
 <br/>
 remote answer: <br/><textarea id="pubRemoteSessionDescription" readonly="true"></textarea>
@@ -144,6 +146,50 @@ window.runPublisher = () => {
         })
         .catch(log);
     }).catch(log);
+
+  document.getElementById("run_pub_screenshare").onclick = () => {
+    navigator.mediaDevices.getDisplayMedia({video: true})
+      .then(stream => {
+
+        let room = document.getElementById("run_pub_room").value;
+        let _id = document.getElementById("run_pub_id").value;
+        let id = `${_id}-screen`;
+        let token = document.getElementById("run_pub_token").value;
+
+        let pub_screen_pc = new RTCPeerConnection({
+          iceServers: [
+            {
+              urls: "stun:stun.l.google.com:19302"
+            },
+            // also TURN servers here
+          ]
+        });
+
+        stream.getTracks().forEach(track => pub_screen_pc.addTrack(track, stream));
+        document.getElementById("pub_video_screenshare").srcObject = stream;
+
+        pub_screen_pc.createOffer()
+          .then(offer => {
+            pub_screen_pc.setLocalDescription(offer);
+            fetch(`/pub/${room}/${id}`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${token}`,
+              },
+              body: offer.sdp,
+            }).then(res => {
+              log(`Request complete! URL ${res.url} status ${res.status}`);
+              res.text().then(function(answer) {
+                document.getElementById("pubRemoteSessionDescription").value = answer;
+                pub_screen_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
+              })
+            });
+          })
+          .catch(log);
+
+        // TODO: use renegotiation instead of new PC
+      }).catch(log);
+  }
 }
 </script>
 <hr>
