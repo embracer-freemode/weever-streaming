@@ -48,7 +48,7 @@ use tokio::time::{Duration, timeout};
 use tokio::sync::oneshot;
 use tracing::Instrument;
 use std::pin::Pin;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, Weak, atomic::{AtomicU8, Ordering}};
 
 
 struct Publisher(Arc<Publisher>);
@@ -222,6 +222,7 @@ impl PublisherDetails {
         let wpc = self.pc_downgrade();
         let user = self.user.clone();
         let room = self.room.clone();
+        let track_count = Arc::new(AtomicU8::new(0));
 
         Box::new(move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
             let _enter = span.enter();  // populate user & room info in following logs
@@ -233,6 +234,7 @@ impl PublisherDetails {
                 let user = user.clone();
                 let room = room.clone();
                 let nc = nc.clone();
+                let track_count = track_count.clone();
                 return Box::pin(async move {
                     let tid = track.tid();
                     let kind = track.kind().to_string();
@@ -256,11 +258,9 @@ impl PublisherDetails {
                         kind,
                     )).await;
 
-                    // track's tid is strictly monotonic increasing
-                    // it only goes up and the limit is 256 (u8)
-                    // tid starts with 0
-                    //
-                    // tid 1 means we have 2 streams now (assume it's 1 video and 1 audio)
+                    let count = track_count.fetch_add(1, Ordering::SeqCst) + 1;
+
+                    // if all the tranceivers have active track
                     // let's fire the publisher join notify to all subscribers
                     {
                         let pc = match wpc.upgrade() {
@@ -268,10 +268,12 @@ impl PublisherDetails {
                             Some(pc) => pc,
                         };
                         let total = pc.get_transceivers().await.len();
-                        // TODO: make sure only fire once?
-                        if (tid+1) == total {
-                            info!("we got {} active remote tracks now", total);
+                        // TODO: make sure only fire once even in renegotiation?
+                        if count as usize >= total {
+                            info!("we got {} active remote tracks, all ready", total);
                             Self::notify_subs_for_join(&room, &user).await;
+                        } else {
+                            info!("we got {} active remote tracks, target is {}", count, total);
                         }
                     }
 
@@ -281,7 +283,7 @@ impl PublisherDetails {
 
                     // push RTP to NATS
                     Self::spawn_rtp_to_nats(room, user, app_id.to_string(), track, nc.clone());
-                });
+                }.instrument(tracing::Span::current()));
             }
 
             Box::pin(async {})
