@@ -68,6 +68,7 @@ WebRTC specs
 * [W3C - WebRTC Priority Control API](https://www.w3.org/TR/webrtc-priority/)
 * [W3C - IceTransport Extensions for WebRTC](https://w3c.github.io/webrtc-ice/)
 * [W3C - WebRTC 1.0 Interoperability Tests Results](https://w3c.github.io/webrtc-interop-reports/webrtc-pc-report.html)
+* [RFC 4566 - SDP Session Description Protocol](https://datatracker.ietf.org/doc/rfc4566/)
 * [RFC 5285 - A General Mechanism for RTP Header Extensions](https://datatracker.ietf.org/doc/rfc5285/)
 * [RFC 6386 - VP8 Data Format and Decoding Guide](https://datatracker.ietf.org/doc/rfc6386/)
 * [RFC 6716 - Definition of the Opus Audio Codec](https://datatracker.ietf.org/doc/rfc6716/)
@@ -476,8 +477,8 @@ Future Works
     - [X] new subscriber join in the middle, can get existing publishers' streams
     - [X] publisher leave and rejoin again
     - [X] cover all audio room use cases
-    - [ ] screen share (media add/remove for same publisher)
-    - [ ] cover all video room use cases
+    - [X] screen share (via 1 extra WebRTC connection)
+    - [X] cover all video room use cases
     - [ ] chatting via datachannel
 
 * Horizontal Scale
@@ -487,14 +488,18 @@ Future Works
 
 * Stability
     - [X] compiler warnings cleanup
+    - [ ] make sure all Tokio tasks will end when clients leave
+    - [ ] set TTL for all Redis key/value
     - [ ] unwrap usage cleanup
     - [ ] WebRTC spec reading
     - [ ] more devices test (Windows/MacOS/Linux/Android/iOS with Chrome/Firefox/Safari/Edge)
 
 * Performance Optimization
-    - [ ] WebRTC.rs stack digging
+    - [ ] use same WebRTC connection for screen share (media add/remove for same publisher)
     - [ ] don't pull streams for subscriber, if the publisher is with same id
     - [ ] compile with `RUSTFLAGS="-Z sanitizer=leak"` and test, make sure there is no memory leak
+    - [ ] faster showing on subscribers' site when publisher join
+    - [ ] WebRTC.rs stack digging
 
 * Monitor
     - [ ] use spans info to show on Grafana (by room)
@@ -504,6 +509,7 @@ Future Works
     - [X] in-cluster API for publishers list
     - [X] in-cluster API for subscribers list
     - [X] assign public IP from outside to show on the ICE (via set_nat_1to1_ips)
+    - [ ] show selected ICE candidate on demo site
     - [ ] split user API and internal setting API
     - [ ] force non-trickle on web
     - [ ] better TURN servers setup for demo site
