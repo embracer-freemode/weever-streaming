@@ -208,12 +208,31 @@ impl SubscriberDetails {
         // TODO: dynamic creation
         // TODO: how to handle video/audio from same publisher and send to different track?
         // HACK_MEDIA.lock().unwrap().push("video".to_string());
+        //
+        // TODO: share with PUB_JOIN handler
+
+        let mut video_count = 0;
+        let mut audio_count = 0;
 
         let media = SHARED_STATE.get_user_track_to_mime(&self.room).await.context("get user track to mime failed")?;
         for ((user, track_id), mime) in media {
+            // skip it if publisher is the same as subscriber
+            // so we won't pull back our own media streams and cause echo effect
+            if user == self.user {
+                continue;
+            }
+
             let app_id = match mime.as_ref() {
-                "video" => "video0",
-                "audio" => "audio0",
+                "video" => {
+                    let result = format!("video{}", video_count);
+                    video_count += 1;
+                    result
+                },
+                "audio" => {
+                    let result = format!("audio{}", audio_count);
+                    audio_count += 1;
+                    result
+                },
                 _ => unreachable!(),
             };
 
@@ -236,6 +255,8 @@ impl SubscriberDetails {
                 // This must be unique.
                 user.to_string(),           // msid, group id part
             ));
+
+            info!("track map ({}, {}) -> {}", user, track_id, app_id);
 
             // for later dyanmic RTP dispatch from NATS
             self.tracks.write().unwrap().insert((user.clone(), track_id.clone()), track.clone());
@@ -365,6 +386,7 @@ impl SubscriberDetails {
         let user_media_to_senders = self.user_media_to_senders.clone();
         let notify_sender = self.notify_sender.as_ref().unwrap().clone();
         let room = self.room.clone();
+        let user = self.user.clone();
 
         Box::new(move |dc: Arc<RTCDataChannel>| {
             let _enter = span.enter();  // populate user & room info in following logs
@@ -380,6 +402,7 @@ impl SubscriberDetails {
             // channel open handling
             Self::on_data_channel_open(
                 room.clone(),
+                user.clone(),
                 wpc.clone(),
                 dc,
                 dc_label,
@@ -395,6 +418,7 @@ impl SubscriberDetails {
 
     fn on_data_channel_open(
             room: String,
+            user: String,
             wpc: WeakPeerConnection,
             dc: Arc<RTCDataChannel>,
             dc_label: String,
@@ -410,6 +434,7 @@ impl SubscriberDetails {
         Box::pin(async move {
             dc.on_open(Self::on_data_channel_sender(
                     room,
+                    user,
                     wpc.clone(),
                     dc.clone(),
                     dc_label.clone(),
@@ -432,6 +457,7 @@ impl SubscriberDetails {
     }
 
     fn on_data_channel_sender(room: String,
+                              user: String,
                               wpc: WeakPeerConnection,
                               dc: Arc<RTCDataChannel>,
                               dc_label: String,
@@ -495,6 +521,7 @@ impl SubscriberDetails {
                             Self::on_pub_join(
                                 room.clone(),
                                 join_user.to_string(),
+                                user.clone(),
                                 pc.clone(),
                                 media.clone(),
                                 tracks.clone(),
@@ -597,6 +624,7 @@ impl SubscriberDetails {
     async fn on_pub_join(
             _room: String,
             join_user: String,
+            sub_user: String,
             pc: Arc<RTCPeerConnection>,
             media: HashMap<(String, String), String>,
             tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
@@ -606,7 +634,17 @@ impl SubscriberDetails {
 
         info!("pub join: {}", join_user);
 
+        // skip it if publisher is the same as subscriber
+        // so we won't pull back our own media streams and cause echo effect
+        if join_user == sub_user {
+            return;
+        }
+
+        let mut video_count = 0;
+        let mut audio_count = 0;
+
         // add new track for PUB_JOIN
+        // TODO: use better mechanism replace "(user, track) -> mime"
         for ((pub_user, track_id), mime) in media {
             if tracks.read().unwrap().contains_key(&(pub_user.clone(), track_id.clone())) {
                 continue;
@@ -615,8 +653,16 @@ impl SubscriberDetails {
             // hardcode this for now
             // we may need to change it to support like screen sharing later
             let app_id = match mime.as_ref() {
-                "video" => "video0",
-                "audio" => "audio0",
+                "video" => {
+                    let result = format!("video{}", video_count);
+                    video_count += 1;
+                    result
+                },
+                "audio" => {
+                    let result = format!("audio{}", audio_count);
+                    audio_count += 1;
+                    result
+                },
                 _ => unreachable!(),
             };
 
@@ -843,7 +889,6 @@ impl SubscriberDetails {
         let subject = self.get_nats_subect();
         let sub = self.nats.subscribe(&subject).await?;
         let tracks = self.tracks.clone();
-        let sub_user = self.user.clone();
 
         // Read RTP packets forever and send them to the WebRTC Client
         tokio::spawn(async move {
@@ -851,20 +896,19 @@ impl SubscriberDetails {
             while let Some(msg) = sub.next().await {
                 let raw_rtp = msg.data;
 
+                // TODO: leave the loop when subscriber leaves
+
                 // TODO: real dyanmic dispatch for RTP
-                // subject sample: "rtc.1234.user1.v.video1" "rtc.1234.user1.a.audio1"
+                // subject sample: "rtc.1234.user1.video.video1" "rtc.1234.user1.audio.audio1"
                 let mut it = msg.subject.rsplitn(4, ".").take(3);
                 let track_id = it.next().unwrap().to_string();
                 let user = it.skip(1).next().unwrap().to_string();
-                // TODO: don't push the RTP to subscriber is the publisher has same id
-                if user == sub_user {
-                    continue;
-                }
                 let track = {
                     let tracks = tracks.read().unwrap();
                     let track = tracks.get(&(user, track_id));
-                    // FIXME: we should always prepare all the tracks for sending RTP
-                    // TODO: create new tracks in renegotiation case
+                    // if we don't have corresponding track
+                    // either we are not ready for this
+                    // or the RTP is from ourself (publisher == subscriber)
                     if track.is_none() {
                         continue;
                     }
