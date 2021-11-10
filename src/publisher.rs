@@ -202,6 +202,8 @@ impl PublisherDetails {
         let user = self.user.clone();
         let room = self.room.clone();
         let track_count = Arc::new(AtomicU8::new(0));
+        let video_count = Arc::new(AtomicU8::new(0));
+        let audio_count = Arc::new(AtomicU8::new(0));
 
         Box::new(move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
             let _enter = span.enter();  // populate user & room info in following logs
@@ -214,6 +216,8 @@ impl PublisherDetails {
                 let room = room.clone();
                 let nc = nc.clone();
                 let track_count = track_count.clone();
+                let video_count = video_count.clone();
+                let audio_count = audio_count.clone();
                 return Box::pin(async move {
                     let tid = track.tid();
                     let kind = track.kind().to_string();
@@ -228,16 +232,26 @@ impl PublisherDetails {
                           msid,         // the msid here generated from browser might be "{xxx} {ooo}"
                     );
 
-                    // TODO: more meaningful app_id? e.g. video0 or camera0
-                    let app_id = msid.strip_prefix(&stream_id).unwrap_or(&msid).trim();
+                    let count = track_count.fetch_add(1, Ordering::SeqCst) + 1;
+                    // app_id will become like "video0", "audio0"
+                    let app_id = match kind.as_str() {
+                        "video" => {
+                            let c = video_count.fetch_add(1, Ordering::SeqCst);
+                            format!("video{}", c)
+                        },
+                        "audio" => {
+                            let c = audio_count.fetch_add(1, Ordering::SeqCst);
+                            format!("audio{}", c)
+                        },
+                        _ => unreachable!(),
+                    };
+
                     catch(SHARED_STATE.add_user_track_to_mime(
                         room.clone(),
                         user.clone(),
                         app_id.to_string(),
                         kind,
                     )).await;
-
-                    let count = track_count.fetch_add(1, Ordering::SeqCst) + 1;
 
                     // if all the tranceivers have active track
                     // let's fire the publisher join notify to all subscribers
@@ -300,6 +314,7 @@ impl PublisherDetails {
         // use ID to disquish streams from same publisher
         tokio::spawn(async move {
             let kind = track.kind().to_string();    // video/audio
+            // e.g. "rtc.1234.pub1.video.video0"
             let subject = format!("rtc.{}.{}.{}.{}", room, user, kind, app_id);
             info!("publish to {}", subject);
             let mut b = vec![0u8; 1500];
