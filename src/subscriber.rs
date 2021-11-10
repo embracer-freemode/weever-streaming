@@ -46,6 +46,7 @@ use webrtc::{
 use tokio::time::{Duration, timeout};
 use tokio::sync::oneshot;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tracing::Instrument;
 use std::sync::{Arc, RwLock};
 use std::collections::HashMap;
@@ -83,6 +84,7 @@ struct SubscriberDetails {
     notify_sender: Option<mpsc::Sender<String>>,
     notify_receiver: Option<mpsc::Receiver<String>>,
     created: std::time::SystemTime,
+    tokio_tasks: Arc<RwLock<Vec<JoinHandle<()>>>>,
 }
 
 // for logging only
@@ -283,13 +285,12 @@ impl SubscriberDetails {
     /// Before these packets are returned they are processed by interceptors.
     /// For things like NACK this needs to be called.
     fn spawn_rtcp_reader(&self, rtp_sender: Arc<RTCRtpSender>) {
-        tokio::spawn(async move {
+        self.tokio_tasks.write().unwrap().push(tokio::spawn(async move {
             let mut rtcp_buf = vec![0u8; 1500];
             info!("running RTP sender read");
             while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
             info!("leaving RTP sender read");
-            Result::<()>::Ok(())
-        }.instrument(tracing::Span::current()));
+        }.instrument(tracing::Span::current())));
     }
 
     fn register_notify_message(&mut self) {
@@ -891,7 +892,7 @@ impl SubscriberDetails {
         let tracks = self.tracks.clone();
 
         // Read RTP packets forever and send them to the WebRTC Client
-        tokio::spawn(async move {
+        self.tokio_tasks.write().unwrap().push(tokio::spawn(async move {
             use webrtc::Error;
             while let Some(msg) = sub.next().await {
                 let raw_rtp = msg.data;
@@ -928,7 +929,7 @@ impl SubscriberDetails {
                 }
             }
             info!("leaving NATS to RTP pull: {}", subject);
-        });
+        }));
 
         Ok(())
     }
@@ -970,6 +971,7 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         notify_sender: None,
         notify_receiver: None,
         created: std::time::SystemTime::now(),
+        tokio_tasks: Default::default(),
     };
 
     subscriber.add_trasceivers_based_on_room().await?;
@@ -1029,6 +1031,10 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
     let max_time = Duration::from_secs(3 * 60 * 60);
     timeout(max_time, subscriber.notify_close.notified()).await?;
     peer_connection.close().await?;
+    // remove all spawned tasks
+    for task in subscriber.tokio_tasks.read().unwrap().iter() {
+        task.abort();
+    }
     info!("leaving subscriber main");
 
     Ok(())
