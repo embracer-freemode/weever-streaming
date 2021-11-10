@@ -38,6 +38,8 @@ window.createPublisher = () => {
 </script>
 <hr>
 
+<!-- ---------- -->
+
 <h2>Create subscriber (per subscriber security token setting for pulling streams)</h2>
 (this will only be called from other in-cluster service for settings)<br/>
 room: <input id="create_sub_room" type="text"></input><br/>
@@ -78,12 +80,17 @@ window.createSubscriber = () => {
 </script>
 <hr>
 
+<!-- ---------- -->
+
 <h2>Run Publisher</h2>
 room: <input id="run_pub_room" type="text"></input><br/>
 id: <input id="run_pub_id" type="text"></input><br/>
 token: <input id="run_pub_token" type="text"></input><br/>
 <button onclick="window.runPublisher()">Run Publisher</button><br/><br/>
+<button id="run_pub_screenshare"> Start Screen Share </button>
+<button id="run_pub_screenshare_stop" hidden> Stop Screen Share </button><br />
 <video id="pub_video" width="160" height="120" autoplay muted></video><br />
+<video id="pub_video_screenshare" width="160" height="120" autoplay muted></video><br />
 local offer: <br/><textarea id="pubLocalSessionDescription" readonly="true"></textarea>
 <br/>
 remote answer: <br/><textarea id="pubRemoteSessionDescription" readonly="true"></textarea>
@@ -140,9 +147,75 @@ window.runPublisher = () => {
         })
         .catch(log);
     }).catch(log);
+
+
+  // TODO: don't create new PC
+  var pub_screen_pc;
+
+  document.getElementById("run_pub_screenshare").onclick = () => {
+
+    document.getElementById("run_pub_screenshare").hidden = true;
+    document.getElementById("run_pub_screenshare_stop").hidden = false;
+
+    navigator.mediaDevices.getDisplayMedia({video: true})
+      .then(stream => {
+
+        pub_screen_pc = new RTCPeerConnection({
+          iceServers: [
+            {
+              urls: "stun:stun.l.google.com:19302"
+            },
+            // also TURN servers here
+            {
+              urls: "turn:turn.qonver.com:3478?transport=udp",
+              username: "qonver_janus_user",
+              credential: "user-janus-qonver-975d1705-e543-4735-a89f-a3518a690f02"
+            }
+          ]
+        });
+
+        let room = document.getElementById("run_pub_room").value;
+        let _id = document.getElementById("run_pub_id").value;
+        let id = `${_id}-screen`;
+        let token = document.getElementById("run_pub_token").value;
+
+        stream.getTracks().forEach(track => pub_screen_pc.addTrack(track, stream));
+        document.getElementById("pub_video_screenshare").srcObject = stream;
+
+        pub_screen_pc.createOffer()
+          .then(offer => {
+            pub_screen_pc.setLocalDescription(offer);
+            fetch(`/pub/${room}/${id}`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${token}`,
+              },
+              body: offer.sdp,
+            }).then(res => {
+              log(`Request complete! URL ${res.url} status ${res.status}`);
+              res.text().then(function(answer) {
+                document.getElementById("pubRemoteSessionDescription").value = answer;
+                pub_screen_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
+              })
+            });
+          })
+          .catch(log);
+
+        // TODO: use renegotiation instead of new PC
+      }).catch(log);
+  }
+
+  document.getElementById("run_pub_screenshare_stop").onclick = () => {
+    document.getElementById("run_pub_screenshare").hidden = false;
+    document.getElementById("run_pub_screenshare_stop").hidden = true;
+    document.getElementById("pub_video_screenshare").srcObject = null;
+    pub_screen_pc.close();
+  }
 }
 </script>
 <hr>
+
+<!-- ---------- -->
 
 <h2>Run Sublisher</h2>
 room: <input id="run_sub_room" type="text"></input><br/>
@@ -320,9 +393,6 @@ window.runSubscriber = () => {
       return;
     }
 
-    var div;
-    div = document.getElementById(`media-${id}`)
-
     // cache it for later cleanup
     // TODO: is there any API under PeerConnection can do this?
     // TODO: we can only get the track GUID here? any other API?
@@ -330,22 +400,27 @@ window.runSubscriber = () => {
     id_to_track_events[id].push(event);
     console.log(event);                      // TODO: remove this
 
+    var div;
+    div = document.getElementById(`media-${id}`)
     if (div == null) {
       div = document.createElement("div")
       div.id = `media-${id}`
       div.textContent = id
+      document.getElementById("sub_videos").appendChild(div)
     }
 
     // video or audio here
-    let media = document.createElement(event.track.kind)
-
+    var media;
+    media = document.getElementById(`media-${id}-${event.track.id}`)
+    if (media == null) {
+      media = document.createElement(event.track.kind)
+      media.id = `media-${id}-${event.track.kind}-${event.track.id}`
+      div.appendChild(media)
+    }
     // TODO: multiple media streams?
     media.srcObject = event.streams[0]
     media.autoplay = true
     media.controls = true
-
-    div.appendChild(media)
-    document.getElementById("sub_videos").appendChild(div)
   }
 
   sub_pc.createOffer()
@@ -385,3 +460,58 @@ video {
     max-height: 200;
 }
 </style>
+<hr>
+
+<!-- ---------- -->
+
+<h2>List Publishers</h2>
+room: <input id="list_pubs_room" type="text"></input><br/>
+<button onclick="window.listPublishers()">List Publishers</button><br/><br/>
+Logs:<br/>
+<div id="list_pubs_log"></div>
+<script>
+window.listPublishers = () => {
+  let log = msg => {
+    document.getElementById("list_pubs_log").innerHTML += msg + "<br>"
+  }
+
+  let room = document.getElementById("list_pubs_room").value;
+
+  fetch(`/list/pub/${room}`, {
+    method: "GET",
+  }).then(res => {
+    log(`Request complete! URL ${res.url} status ${res.status}`);
+    res.text().then(function(answer) {
+      log(answer);
+    })
+  });
+}
+</script>
+<hr>
+
+<!-- ---------- -->
+
+<h2>List Subscribers</h2>
+room: <input id="list_subs_room" type="text"></input><br/>
+<button onclick="window.listSubscribers()">List Subscribers</button><br/><br/>
+Logs:<br/>
+<div id="list_subs_log"></div>
+<script>
+window.listSubscribers = () => {
+  let log = msg => {
+    document.getElementById("list_subs_log").innerHTML += msg + "<br>"
+  }
+
+  let room = document.getElementById("list_subs_room").value;
+
+  fetch(`/list/sub/${room}`, {
+    method: "GET",
+  }).then(res => {
+    log(`Request complete! URL ${res.url} status ${res.status}`);
+    res.text().then(function(answer) {
+      log(answer);
+    })
+  });
+}
+</script>
+<hr>

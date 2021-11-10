@@ -68,7 +68,28 @@ WebRTC specs
 * [W3C - WebRTC Priority Control API](https://www.w3.org/TR/webrtc-priority/)
 * [W3C - IceTransport Extensions for WebRTC](https://w3c.github.io/webrtc-ice/)
 * [W3C - WebRTC 1.0 Interoperability Tests Results](https://w3c.github.io/webrtc-interop-reports/webrtc-pc-report.html)
+* [RFC 4566 - SDP Session Description Protocol](https://datatracker.ietf.org/doc/rfc4566/)
+* [RFC 5285 - A General Mechanism for RTP Header Extensions](https://datatracker.ietf.org/doc/rfc5285/)
+* [RFC 6386 - VP8 Data Format and Decoding Guide](https://datatracker.ietf.org/doc/rfc6386/)
+* [RFC 6716 - Definition of the Opus Audio Codec](https://datatracker.ietf.org/doc/rfc6716/)
+    - based on LPC (Linear Predictive Coding) & MDCT (Modified Discrete Cosine Transform)
+    - in speech, LPC based (e.g. CELP) code low frequencies more efficiently than transform domain techniques (e.g. MDCT)
+    - The Opus codec includes a number of control parameters that can be changed dynamically during regular operation of the codec, without interrupting the audio stream from the encoder to the decoder.
+    - These parameters only affect the encoder since any impact they have on the bitstream is signaled in-band such that a decoder can decode any Opus stream without any out-of-band signaling.
+    - Any Opus implementation can add or modify these control parameters without affecting interoperability.
+    - Control Parameters
+        + Bitrate (6 ~ 510 kbit/s)
+        + Number of Channels (Mono/Stereo)
+        + Audio Bandwidth
+        + Frame Duration
+        + Complexity (CPU complexity v.s. quality/bitrate)
+        + Packet Loss Resilience
+        + Forward Error Correction (FEC)
+        + Constant/Variable Bitrate
+        + Discontinuous Transmission (DTX) (can reduce the bitrate during silence or background noise)
 * [RFC 7478 - Web Real-Time Communication Use Cases and Requirements](https://datatracker.ietf.org/doc/rfc7478/)
+* [RFC 7587 - RTP Payload Format for the Opus Speech and Audio Codec](https://datatracker.ietf.org/doc/rfc7587/)
+* [RFC 7741 - RTP Payload Format for VP8 Video](https://datatracker.ietf.org/doc/rfc7741/)
 * [RFC 7742 - WebRTC Video Processing and Codec Requirements](https://datatracker.ietf.org/doc/rfc7742/)
 * [RFC 7874 - WebRTC Audio Codec and Processing Requirements](https://datatracker.ietf.org/doc/rfc7874/)
 * [RFC 7875 - Additional WebRTC Audio Codecs for Interoperability](https://datatracker.ietf.org/doc/rfc7875/)
@@ -426,6 +447,8 @@ Future Works
     - [X] Multistream (1 connnetion for multiple video/audio streams pulling)
     - [X] Datachannel
     - [X] WebRTC Renegotiation
+    - [ ] audio codec parameters config
+    - [ ] video codec parameters config
     - [ ] ICE restart
     - [ ] SVC: VP8-SVC
     - [ ] SVC: AV1-SVC
@@ -454,8 +477,8 @@ Future Works
     - [X] new subscriber join in the middle, can get existing publishers' streams
     - [X] publisher leave and rejoin again
     - [X] cover all audio room use cases
-    - [ ] screen share (media add/remove for same publisher)
-    - [ ] cover all video room use cases
+    - [X] screen share (via 1 extra WebRTC connection)
+    - [X] cover all video room use cases
     - [ ] chatting via datachannel
 
 * Horizontal Scale
@@ -464,11 +487,18 @@ Future Works
     - [ ] subscriber based scaling mechanism (need to cowork with Helm chart)
 
 * Stability
-    - [ ] unwrap cleanup
+    - [X] compiler warnings cleanup
+    - [ ] make sure all Tokio tasks will end when clients leave
+    - [ ] set TTL for all Redis key/value
+    - [ ] unwrap usage cleanup
     - [ ] WebRTC spec reading
     - [ ] more devices test (Windows/MacOS/Linux/Android/iOS with Chrome/Firefox/Safari/Edge)
 
 * Performance Optimization
+    - [ ] use same WebRTC connection for screen share (media add/remove for same publisher)
+    - [ ] don't pull streams for subscriber, if the publisher is with same id
+    - [ ] compile with `RUSTFLAGS="-Z sanitizer=leak"` and test, make sure there is no memory leak
+    - [ ] faster showing on subscribers' site when publisher join
     - [ ] WebRTC.rs stack digging
 
 * Monitor
@@ -476,9 +506,13 @@ Future Works
     - [ ] use spans info to show on Grafana (by user)
 
 * Misc
-    - [ ] in-cluster API for publishers list
-    - [ ] in-cluster API for subscribers list
+    - [X] in-cluster API for publishers list
+    - [X] in-cluster API for subscribers list
+    - [X] assign public IP from outside to show on the ICE (via set_nat_1to1_ips)
+    - [ ] show selected ICE candidate on demo site
     - [ ] split user API and internal setting API
+    - [ ] force non-trickle on web
+    - [ ] better TURN servers setup for demo site
 
 * Issues (discover during development or team test)
     - [ ] publisher rejoin sometime will cause video stucking on subscriber side
