@@ -303,7 +303,9 @@ impl PublisherDetails {
             let subject = format!("rtc.{}.{}.{}.{}", room, user, kind, app_id);
             info!("publish to {}", subject);
             let mut b = vec![0u8; 1500];
-            while let Ok((n, _)) = track.read(&mut b).await {
+            // use a timeout to make sure we will close this loop if we don't get new RTP for a while
+            let max_time = Duration::from_secs(10);
+            while let Ok(Ok((n, _))) = timeout(max_time, track.read(&mut b)).await {
                 nats.publish(&subject, &b[..n]).await?;
             }
             info!("leaving RTP to NATS push: {}", subject);
