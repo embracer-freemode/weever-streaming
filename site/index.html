@@ -95,6 +95,8 @@ local offer: <br/><textarea id="pubLocalSessionDescription" readonly="true"></te
 <br/>
 remote answer: <br/><textarea id="pubRemoteSessionDescription" readonly="true"></textarea>
 <br/>
+selected local candidate: <div id="run_pub_local_ice"></div>
+selected remote candidate: <div id="run_pub_remote_ice"></div>
 Logs:<br/>
 <div id="run_pub_log"></div>
 <script>
@@ -112,7 +114,26 @@ window.runPublisher = () => {
     ]
   })
 
-  pub_pc.oniceconnectionstatechange = e => log(pub_pc.iceConnectionState);
+  pub_pc.oniceconnectionstatechange = e => {
+    log(pub_pc.iceConnectionState);
+    if (pub_pc.iceConnectionState == "connected") {
+      pub_pc.getStats().then(s => {
+        s.forEach(o => {
+          // chrome
+          if (o.state == "succeeded") {
+            document.getElementById("run_pub_local_ice").innerHTML = JSON.stringify(s.get(o.localCandidateId));
+            document.getElementById("run_pub_remote_ice").innerHTML = JSON.stringify(s.get(o.remoteCandidateId));
+          }
+          // firefox
+          if (o.selected == true) {
+            document.getElementById("run_pub_local_ice").innerHTML = JSON.stringify(s.get(o.localCandidateId));
+            document.getElementById("run_pub_remote_ice").innerHTML = JSON.stringify(s.get(o.remoteCandidateId));
+          }
+        })
+      })
+    }
+  }
+
   pub_pc.onicecandidate = event => {
     if (event.candidate === null) {
       document.getElementById("pubLocalSessionDescription").value = pub_pc.localDescription.sdp
@@ -223,6 +244,8 @@ id: <input id="run_sub_id" type="text"></input><br/>
 token: <input id="run_sub_token" type="text"></input><br/>
 local offer: <br/><textarea id="subLocalSessionDescription" readonly="true"></textarea><br/>
 remote answer: <br/><textarea id="subRemoteSessionDescription" readonly="true"></textarea><br/>
+selected local candidate: <div id="run_sub_local_ice"></div>
+selected remote candidate: <div id="run_sub_remote_ice"></div>
 <button onclick="window.runSubscriber()"> Start Session </button><br />
 <br/>
 Video<br/>
@@ -266,7 +289,26 @@ window.runSubscriber = () => {
   // for easier debug and trial only
   window.id_to_track_events = id_to_track_events;
 
-  sub_pc.oniceconnectionstatechange = e => log(sub_pc.iceConnectionState);
+  sub_pc.oniceconnectionstatechange = e => {
+    log(sub_pc.iceConnectionState);
+    if (sub_pc.iceConnectionState == "connected") {
+      sub_pc.getStats().then(s => {
+        s.forEach(o => {
+          // chrome
+          if (o.state == "succeeded") {
+            document.getElementById("run_sub_local_ice").innerHTML = JSON.stringify(s.get(o.localCandidateId));
+            document.getElementById("run_sub_remote_ice").innerHTML = JSON.stringify(s.get(o.remoteCandidateId));
+          }
+          // firefox
+          if (o.selected == true) {
+            document.getElementById("run_sub_local_ice").innerHTML = JSON.stringify(s.get(o.localCandidateId));
+            document.getElementById("run_sub_remote_ice").innerHTML = JSON.stringify(s.get(o.remoteCandidateId));
+          }
+        })
+      })
+    }
+  }
+
   sub_pc.onicecandidate = event => {
     if (event.candidate === null) {
       document.getElementById("subLocalSessionDescription").value = sub_pc.localDescription.sdp

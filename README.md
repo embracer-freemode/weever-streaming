@@ -510,7 +510,7 @@ Future Works
     - [X] in-cluster API for publishers list
     - [X] in-cluster API for subscribers list
     - [X] assign public IP from outside to show on the ICE (via set_nat_1to1_ips)
-    - [ ] show selected ICE candidate on demo site
+    - [X] show selected ICE candidate on demo site
     - [ ] split user API and internal setting API
     - [ ] force non-trickle on web
     - [ ] better TURN servers setup for demo site
