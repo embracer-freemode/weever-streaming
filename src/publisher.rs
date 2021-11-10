@@ -51,16 +51,6 @@ use std::pin::Pin;
 use std::sync::{Arc, Weak, atomic::{AtomicU8, Ordering}};
 
 
-struct Publisher(Arc<Publisher>);
-struct PublisherWeak(Weak<Publisher>);
-
-impl PublisherWeak {
-    // Try upgrading a weak reference to a strong one
-    fn upgrade(&self) -> Option<Publisher> {
-        self.0.upgrade().map(Publisher)
-    }
-}
-
 /////////////////////////
 // Weak reference helper
 /////////////////////////
@@ -92,17 +82,6 @@ struct PublisherDetails {
 impl std::ops::Drop for PublisherDetails {
     fn drop(&mut self) {
         info!("dropping PublisherDetails for room {} user {}", self.room, self.user);
-    }
-}
-
-// To be able to access the internal fields directly
-// We wrap the real things with reference counting and new type,
-// this will let us use the wrapping type like there is no wrap.
-impl std::ops::Deref for Publisher {
-    type Target = PublisherDetails;
-
-    fn deref(&self) -> &PublisherDetails {
-        &self.0
     }
 }
 
