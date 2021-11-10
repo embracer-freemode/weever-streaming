@@ -220,7 +220,8 @@ impl SubscriberDetails {
         for ((user, track_id), mime) in media {
             // skip it if publisher is the same as subscriber
             // so we won't pull back our own media streams and cause echo effect
-            if user == self.user {
+            // TODO: remove the hardcode "-screen" case
+            if user == self.user || user == format!("{}-screen", self.user) {
                 continue;
             }
 
@@ -637,7 +638,8 @@ impl SubscriberDetails {
 
         // skip it if publisher is the same as subscriber
         // so we won't pull back our own media streams and cause echo effect
-        if join_user == sub_user {
+        // TODO: remove the hardcode "-screen" case
+        if join_user == sub_user || join_user == format!("{}-screen", sub_user){
             return;
         }
 
@@ -647,6 +649,12 @@ impl SubscriberDetails {
         // add new track for PUB_JOIN
         // TODO: use better mechanism replace "(user, track) -> mime"
         for ((pub_user, track_id), mime) in media {
+            // skip it if publisher is the same as subscriber
+            // so we won't pull back our own media streams and cause echo effect
+            if pub_user == sub_user || pub_user == format!("{}-screen", sub_user) {
+                continue;
+            }
+
             if tracks.read().unwrap().contains_key(&(pub_user.clone(), track_id.clone())) {
                 continue;
             }
@@ -673,7 +681,6 @@ impl SubscriberDetails {
                 _ => unreachable!(),
             };
 
-            // info!("{} add new track for {} {}", user, pub_user, track_id);   // TODO: or use tracing's span
             info!("add new track for {} {}", pub_user, track_id);
 
             let track = Arc::new(TrackLocalStaticRTP::new(
