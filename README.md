@@ -488,13 +488,14 @@ Future Works
 
 * Stability
     - [X] compiler warnings cleanup
+    - [X] set TTL for all Redis key/value (1 day)
     - [ ] make sure all Tokio tasks will end when clients leave
-    - [ ] set TTL for all Redis key/value
     - [ ] unwrap usage cleanup
     - [ ] WebRTC spec reading
     - [ ] more devices test (Windows/MacOS/Linux/Android/iOS with Chrome/Firefox/Safari/Edge)
 
 * Performance Optimization
+    - [X] (subscriber) don't create transceiver at first hand when publisher is the same as subscriber
     - [ ] use same WebRTC connection for screen share (media add/remove for same publisher)
     - [ ] don't pull streams for subscriber, if the publisher is with same id
     - [ ] compile with `RUSTFLAGS="-Z sanitizer=leak"` and test, make sure there is no memory leak
