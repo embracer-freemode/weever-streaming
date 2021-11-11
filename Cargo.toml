@@ -25,9 +25,10 @@ redis = { version = "0.21.4", features = ["tokio-comp"] }
 webrtc = { git = "https://github.com/webrtc-rs/webrtc", rev = "91669be" }
 # tracing ecosystem
 tracing = "0.1.29"
-tracing-appender = "0.1.2"
+tracing-appender = "0.2.0"
 tracing-log = "0.1.2"
-tracing-subscriber = "0.2.25"
+tracing-subscriber = { version = "0.3.1", features = ["fmt", "env-filter"] }
+console-subscriber = { git = "https://github.com/tokio-rs/console", rev = "a30264e" }
 # web server
 actix-web = { version = "4.0.0-beta.10", features = ["rustls"] } # web framework
 actix-web-httpauth = { git = "https://github.com/actix/actix-extras", rev = "477b0f8" }   # bearerer token
