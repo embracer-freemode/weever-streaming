@@ -55,20 +55,90 @@ WebRTC specs
 * [W3C - WebRTC 1.0: Real-Time Communication Between Browsers](https://www.w3.org/TR/webrtc/)
 * [W3C - WebRTC Next Version Use Cases](https://www.w3.org/TR/webrtc-nv-use-cases/)
 * [W3C - Scalable Video Coding (SVC) Extension for WebRTC](https://www.w3.org/TR/webrtc-svc/)
+    - SST (Single-Session Transmission)
+    - MST (Multi-Session Transmission)
+    - MRST (Multiple RTP stream Single Transport)
+    - Spatial Simulcast and Temporal Scalability
+        + "L2T3" means 2 Spatial Layers & 3 Temporal Layers & Inter-layer dependency
+        + "S2T3" means 2 Spatial Layers & 3 Temporal Layers & No Inter-layer dependency (Simulcast)
+    - `scalabilityMode`
 * [W3C - Screen Capture](https://www.w3.org/TR/screen-capture/)
 * [W3C - MediaStreamTrack Content Hints](https://www.w3.org/TR/mst-content-hint/)
+    - audio: "", "speech", "speech-recognition", "music"
+    - video: "", "motion", "detail", "text"
+    - degradation preference: "maintain-framerate", "maintain-resolution", "balanced"
 * [W3C - Viewport Capture](https://w3c.github.io/mediacapture-viewport/)
 * [W3C - WebRTC Encoded Transform](https://w3c.github.io/webrtc-encoded-transform/)
+    - manipulating the bits on MediaStreamTracks being sent via an RTCPeerConnection
+    - e.g. funny hats effect, machine learning model, virtual reality
 * [W3C - Media Capture and Streams Extensions](https://w3c.github.io/mediacapture-extensions/)
+    - semantics: "browser-chooses", "user-chooses"
+    - deviceId
 * [W3C - Identifiers for WebRTC's Statistics API](https://www.w3.org/TR/webrtc-stats/)
+    - types
+        + codec
+        + inbound-rtp
+        + outbound-rtp
+        + remote-inbound-rtp
+        + remote-outbound-rtp
+        + media-source
+        + csrc
+        + peer-connection
+        + data-channel
+        + stream
+        + track
+        + transceiver
+        + sender
+        + receiver
+        + transport
+        + sctp-transport
+        + candidate-pair
+        + local-candidate
+        + remote-candidate
+        + certificate
+        + ice-server
+    - RTCP Receiver Report (RR)
+    - RTCP Extended Report (XR)
+    - RTCP Sender Report (SR)
+    - audio `voiceActivityFlag`: Whether the last RTP packet whose frame was delivered to the RTCRtpReceiver's MediaStreamTrack for playout contained voice activity or not based on the presence of the V bit in the extension header, as defined in RFC6464. This is the stats-equivalent of RTCRtpSynchronizationSource.
+    - RTCQualityLimitationReason
 * [W3C - Identity for WebRTC 1.0](https://www.w3.org/TR/webrtc-identity/)
 * [W3C - Audio Output Devices API](https://www.w3.org/TR/audio-output/)
 * [W3C - Media Capture from DOM Elements](https://www.w3.org/TR/mediacapture-fromelement/)
 * [W3C - MediaStream Recording](https://www.w3.org/TR/mediastream-recording/)
 * [W3C - WebRTC Priority Control API](https://www.w3.org/TR/webrtc-priority/)
+    - WebRTC uses the priority and Quality of Service (QoS) framework described in rfc8835 and rfc8837 to provide priority and DSCP marking for packets that will help provide QoS in some networking environments.
 * [W3C - IceTransport Extensions for WebRTC](https://w3c.github.io/webrtc-ice/)
 * [W3C - WebRTC 1.0 Interoperability Tests Results](https://w3c.github.io/webrtc-interop-reports/webrtc-pc-report.html)
-* [RFC 4566 - SDP Session Description Protocol](https://datatracker.ietf.org/doc/rfc4566/)
+* [RFC 4566 - SDP: Session Description Protocol](https://datatracker.ietf.org/doc/rfc4566/)
+    - example usage: SIP (Session Initiation Protocol), RTSP (Real Time Streaming Protocol), SAP (Session Announcement Protocol)
+    - `<type>=<value>`, `<type>` MUST be exactly one case-significant character and `<value>` is structured text whose format depends on `<type>`
+    - Whitespace MUST NOT be used on either side of the "=" sign
+    - Session description
+        + v=  (protocol version)
+        + o=  (originator and session identifier)
+        + s=  (session name)
+        + i=* (session information)
+        + u=* (URI of description)
+        + e=* (email address)
+        + p=* (phone number)
+        + c=* (connection information -- not required if included in all media)
+        + b=* (zero or more bandwidth information lines)
+        + One or more time descriptions ("t=" and "r=" lines; see below)
+        + z=* (time zone adjustments)
+        + k=* (encryption key)
+        + a=* (zero or more session attribute lines)
+        + Zero or more media descriptions
+    - Time description
+        + t=  (time the session is active)
+        + r=* (zero or more repeat times)
+    - Media description, if present
+        + m=  (media name and transport address)
+        + i=* (media title)
+        + c=* (connection information -- optional if included at session level)
+        + b=* (zero or more bandwidth information lines)
+        + k=* (encryption key)
+        + a=* (zero or more media attribute lines)
 * [RFC 5285 - A General Mechanism for RTP Header Extensions](https://datatracker.ietf.org/doc/rfc5285/)
 * [RFC 6386 - VP8 Data Format and Decoding Guide](https://datatracker.ietf.org/doc/rfc6386/)
 * [RFC 6716 - Definition of the Opus Audio Codec](https://datatracker.ietf.org/doc/rfc6716/)
