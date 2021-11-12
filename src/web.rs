@@ -18,6 +18,7 @@ use actix_web::{
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use actix_files::Files;
+use actix_cors::Cors;
 use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 
@@ -63,9 +64,25 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     let url = format!("{}:{}", cli.host, cli.port);
     HttpServer::new(move || {
             let data = web::Data::new(cli.clone());
+            let domain = cli.domain.clone();
+            // set CORS for easier frontend development
+            let cors = Cors::default()
+                .allowed_origin("http://localhost/")
+                .allowed_origin("https://localhost/")
+                .allowed_origin_fn(move |origin, _req_head| {
+                    origin.to_str()
+                        .unwrap_or("")
+                        .rsplitn(2, ':')
+                        .skip(1)
+                        .next()
+                        .unwrap_or("")
+                        .ends_with(&domain)
+                });
+
             App::new()
                 // enable logger
                 .wrap(actix_web::middleware::Logger::default())
+                .wrap(cors)
                 .app_data(data)
                 .service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
                 .service(create_pub)
