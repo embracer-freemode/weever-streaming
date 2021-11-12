@@ -511,16 +511,18 @@ Future Works
     - [X] in-cluster API for subscribers list
     - [X] assign public IP from outside to show on the ICE (via set_nat_1to1_ips)
     - [X] show selected ICE candidate on demo site
+    - [X] CORS setting
     - [ ] split user API and internal setting API
     - [ ] force non-trickle on web
     - [ ] better TURN servers setup for demo site
 
 * Issues (discover during development or team test)
+    - [X] sometime it needs 10 seconds to become connected (network problem?)
+    - [X] we get some broken audio from time to time -> OK now
+    - [X] Safari can't connect -> OK now
     - [ ] publisher rejoin sometime will cause video stucking on subscriber side
-    - [ ] we get some broken audio from time to time
-    - [ ] sometime it needs 10 seconds to become connected (network problem?)
-    - [ ] Safari can't connect
 
 * Refactor
+    - [ ] share WebRTC generic part of publisher/subscriber code
     - [ ] redesign the room metadata
     - [ ] redesign the SDP flow
