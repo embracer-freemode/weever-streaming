@@ -64,20 +64,19 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     let url = format!("{}:{}", cli.host, cli.port);
     HttpServer::new(move || {
             let data = web::Data::new(cli.clone());
-            let domain = cli.domain.clone();
+            let cors_domain = cli.cors_domain.clone();
             // set CORS for easier frontend development
             let cors = Cors::default()
-                .allowed_origin("http://localhost/")
-                .allowed_origin("https://localhost/")
+                .allowed_origin("http://localhost:8080")
+                .allowed_origin("https://localhost:8443")
                 .allowed_origin_fn(move |origin, _req_head| {
                     origin.to_str()
                         .unwrap_or("")
-                        .rsplitn(2, ':')
-                        .skip(1)
-                        .next()
-                        .unwrap_or("")
-                        .ends_with(&domain)
-                });
+                        .ends_with(&cors_domain)
+                })
+                .allowed_methods(vec!["GET", "POST"])
+                .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
+                .allowed_header(header::CONTENT_TYPE);
 
             App::new()
                 // enable logger

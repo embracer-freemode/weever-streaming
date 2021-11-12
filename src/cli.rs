@@ -8,8 +8,8 @@ use clap::Parser;
 #[derive(Parser)]
 pub struct CliOptions {
     /// Domain (will be used for CORS settings)
-    #[clap(short, long, env, default_value = "localhost")]
-    pub domain: String,
+    #[clap(long, env, default_value = "localhost")]
+    pub cors_domain: String,
 
     /// Web server host
     #[clap(short, long, env, default_value = "0.0.0.0")]
