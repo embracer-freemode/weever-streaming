@@ -140,7 +140,7 @@ window.runPublisher = () => {
     }
   }
 
-  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+  navigator.mediaDevices.getUserMedia({ video: true, audio: { echoCancellation: true } })
     .then(stream => {
       stream.getTracks().forEach(track => pub_pc.addTrack(track, stream))
       document.getElementById("pub_video").srcObject = stream
