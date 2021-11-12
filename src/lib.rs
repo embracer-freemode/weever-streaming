@@ -40,9 +40,9 @@ fn main() -> Result<()> {
     // use "console_subscriber::build()"
     // instead of "tracing_subscriber::registry()"
     // for tokio-console
-    let subscriber = console_subscriber::build()
+    let subscriber = tracing_subscriber::registry()
         .with(EnvFilter::from_default_env())    // RUST_LOG env filter
-        // .with(fmt::Layer::new().with_writer(std::io::stdout))
+        .with(fmt::Layer::new().with_writer(std::io::stdout))
         .with(fmt::Layer::new().with_writer(non_blocking));
     // set our logger as global default
     tracing::subscriber::set_global_default(subscriber).context("Unable to set global collector")?;
