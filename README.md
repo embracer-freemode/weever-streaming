@@ -590,7 +590,7 @@ Future Works
     - [X] sometime it needs 10 seconds to become connected (network problem?)
     - [X] we get some broken audio from time to time -> OK now
     - [X] Safari can't connect -> OK now
-    - [ ] publisher rejoin sometime will cause video stucking on subscriber side
+    - [X] publisher rejoin sometime will cause video stucking on subscriber side -> each time publisher join will use an extra random trailing string in the id
 
 * Refactor
     - [ ] share WebRTC generic part of publisher/subscriber code
