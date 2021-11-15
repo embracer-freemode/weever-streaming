@@ -5,7 +5,7 @@
 use crate::helper::catch;
 use anyhow::{Result, Context};
 use async_trait::async_trait;
-use log::info;
+use log::{info, error};
 use tokio::sync::mpsc;
 use once_cell::sync::Lazy;
 use redis::aio::MultiplexedConnection;
@@ -359,7 +359,10 @@ impl SharedState for State {
         };
         for sub in subs {
             // TODO: special enum for all the cases
-            sub.send(format!("PUB_JOIN {}", pub_user)).await.context("send PUB_JOIN to mpsc Sender failed")?;
+            let result = sub.send(format!("PUB_JOIN {}", pub_user)).await.context("send PUB_JOIN to mpsc Sender failed");
+            if let Err(err) = result {
+                error!("{:?}", err);
+            }
         }
         Ok(())
     }
@@ -383,7 +386,10 @@ impl SharedState for State {
         };
         for sub in subs {
             // TODO: special enum for all the cases
-            sub.send(format!("PUB_LEFT {}", pub_user)).await.context("send PUB_LEFT to mpsc Sender failed")?;
+            let result = sub.send(format!("PUB_LEFT {}", pub_user)).await.context("send PUB_LEFT to mpsc Sender failed");
+            if let Err(err) = result {
+                error!("{:?}", err);
+            }
         }
         Ok(())
     }
@@ -407,7 +413,10 @@ impl SharedState for State {
         };
         for sub in subs {
             // TODO: special enum for all the cases
-            sub.send("RENEGOTIATION".to_string()).await.context("send RENEGOTIATION to mpsc Sender failed")?;
+            let result = sub.send("RENEGOTIATION".to_string()).await.context("send RENEGOTIATION to mpsc Sender failed");
+            if let Err(err) = result {
+                error!("{:?}", err);
+            }
         }
         Ok(())
     }
@@ -431,7 +440,10 @@ impl SharedState for State {
         };
         for sub in subs {
             // TODO: special enum for all the cases
-            sub.send(msg.to_string()).await.context("send PUB_MEDIA_ADD to mpsc Sender failed")?;
+            let result = sub.send(msg.to_string()).await.context("send PUB_MEDIA_ADD to mpsc Sender failed");
+            if let Err(err) = result {
+                error!("{:?}", err);
+            }
         }
         Ok(())
     }
