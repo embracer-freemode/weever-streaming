@@ -140,13 +140,18 @@ window.runPublisher = () => {
     }
   }
 
+  let _id = document.getElementById("run_pub_id").value;
+  // use a trailing random id to avoid duplication from same publisher
+  let trailing = "+" + (+new Date).toString(36);
+  let id = _id + trailing;
+  let screen_id = _id + "-screen" + trailing;
+
   navigator.mediaDevices.getUserMedia({ video: true, audio: { echoCancellation: true } })
     .then(stream => {
       stream.getTracks().forEach(track => pub_pc.addTrack(track, stream))
       document.getElementById("pub_video").srcObject = stream
 
       let room = document.getElementById("run_pub_room").value;
-      let id = document.getElementById("run_pub_id").value;
       let token = document.getElementById("run_pub_token").value;
 
       pub_pc.createOffer()
@@ -196,8 +201,6 @@ window.runPublisher = () => {
         });
 
         let room = document.getElementById("run_pub_room").value;
-        let _id = document.getElementById("run_pub_id").value;
-        let id = `${_id}-screen`;
         let token = document.getElementById("run_pub_token").value;
 
         stream.getTracks().forEach(track => pub_screen_pc.addTrack(track, stream));
@@ -206,7 +209,7 @@ window.runPublisher = () => {
         pub_screen_pc.createOffer()
           .then(offer => {
             pub_screen_pc.setLocalDescription(offer);
-            fetch(`/pub/${room}/${id}`, {
+            fetch(`/pub/${room}/${screen_id}`, {
               method: "POST",
               headers: {
                 "Authorization": `Bearer ${token}`,
@@ -471,7 +474,8 @@ window.runSubscriber = () => {
       document.getElementById("subLocalSessionDescription").value = offer.sdp;
 
       let room = document.getElementById("run_sub_room").value;
-      let id = document.getElementById("run_sub_id").value;
+      // use a trailing random id to avoid duplication from same publisher
+      let id = document.getElementById("run_sub_id").value + "+" + (+new Date).toString(36);
       let token = document.getElementById("run_sub_token").value;
 
       fetch(`/sub/${room}/${id}`, {
