@@ -351,53 +351,47 @@ impl PublisherDetails {
 
             info!("PeerConnection State has changed: {}", s);
 
-            if s == RTCPeerConnectionState::Failed {
-                // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
-                // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
-                // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-                info!("Peer Connection has gone to failed exiting: Done forwarding");
+            match s {
+                RTCPeerConnectionState::Connected => {
+                    let now = std::time::SystemTime::now();
+                    let duration = match now.duration_since(created) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            error!("system time error: {}", e);
+                            Duration::from_secs(42) // fake one for now
+                        },
+                    }.as_millis();
+                    info!("Peer Connection connected! spent {} ms from created", duration);
 
-                // also do state cleanup here
-                // in case we didn't go through disconnected and become failed directly
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    catch(SHARED_STATE.remove_publisher(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
-            }
+                    let room = room.clone();
+                    let user = user.clone();
+                    return Box::pin(async move {
+                        catch(SHARED_STATE.add_publisher(&room, &user)).await;
+                    }.instrument(tracing::Span::current()));
+                }
+                RTCPeerConnectionState::Failed |
+                RTCPeerConnectionState::Disconnected |
+                RTCPeerConnectionState::Closed => {
+                    // NOTE:
+                    // In disconnected state, PeerConnection may still come back, e.g. reconnect using an ICE Restart.
+                    // But let's cleanup everything for now.
+                    info!("send close notification");
+                    notify_close.notify_waiters();
 
-            if s == RTCPeerConnectionState::Disconnected {
-                // TODO: also remove the media from state
+                    // TODO: also remove the media from state?
 
-                notify_close.notify_waiters();
+                    let room = room.clone();
+                    let user = user.clone();
+                    return Box::pin(async move {
+                        // tell subscribers a new publisher just leave
+                        // ask subscribers to renegotiation
+                        catch(Self::notify_subs_for_leave(&room, &user)).await;
+                        catch(SHARED_STATE.remove_publisher(&room, &user)).await;
+                    }.instrument(tracing::Span::current()));
 
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    // tell subscribers a new publisher just leave
-                    // ask subscribers to renegotiation
-                    catch(Self::notify_subs_for_leave(&room, &user)).await;
-                    catch(SHARED_STATE.remove_publisher(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
-                // TODO: make sure we will cleanup related stuffs
-            }
-
-            if s == RTCPeerConnectionState::Connected {
-                let now = std::time::SystemTime::now();
-                let duration = match now.duration_since(created) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        error!("system time error: {}", e);
-                        Duration::from_secs(42) // fake one for now
-                    },
-                }.as_millis();
-                info!("Peer Connection connected! spent {} ms from created", duration);
-
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    catch(SHARED_STATE.add_publisher(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
+                    // TODO: make sure we will cleanup related stuffs?
+                },
+                _ => {}
             }
 
             Box::pin(async {})
@@ -504,6 +498,11 @@ impl PublisherDetails {
                     // TODO: add condition to check if needed
                     // FIXME: don't hardcode video & app_id
                     catch(SHARED_STATE.send_pub_media_add(&room, &user, "video", "screen")).await;
+                }.instrument(span.clone()));
+            } else if msg_str == "STOP" {
+                info!("actively close peer connection");
+                return Box::pin(async move {
+                    let _ = pc.close().await;
                 }.instrument(span.clone()));
             }
 

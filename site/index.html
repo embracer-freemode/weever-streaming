@@ -145,6 +145,19 @@ window.runPublisher = () => {
     }
   }
 
+  let sendChannel = pub_pc.createDataChannel("control")
+  sendChannel.onclose = () => console.log("sendChannel has closed")
+  sendChannel.onopen = () => console.log("sendChannel has opened")
+  sendChannel.onmessage = e => {
+    log(`Message from DataChannel "${sendChannel.label}" payload "${e.data}"`);
+
+    if (sendChannel.label != "control") {
+        return;
+    }
+
+    // do something
+  }
+
   let _id = document.getElementById("run_pub_id").value;
   // use a trailing random id to avoid duplication from same publisher
   let trailing = "+" + (+new Date).toString(36);
@@ -235,6 +248,7 @@ window.runPublisher = () => {
   }
 
   document.getElementById("run_pub_stop").onclick = () => {
+    sendChannel.send("STOP");
     document.getElementById("run_pub_start").hidden = false;
     document.getElementById("run_pub_stop").hidden = true;
     document.getElementById("run_pub_screenshare").hidden = true;
@@ -243,6 +257,7 @@ window.runPublisher = () => {
   }
 
   document.getElementById("run_pub_screenshare_stop").onclick = () => {
+    // TODO: proactive stop session, send "STOP" via datachannel
     document.getElementById("run_pub_screenshare").hidden = false;
     document.getElementById("run_pub_screenshare_stop").hidden = true;
     document.getElementById("pub_video_screenshare").srcObject = null;
@@ -513,6 +528,7 @@ window.runSubscriber = () => {
     .catch(log);
 
   document.getElementById("run_sub_stop").onclick = () => {
+    sendChannel.send("STOP");
     document.getElementById("run_sub_start").hidden = false;
     document.getElementById("run_sub_stop").hidden = true;
     document.getElementById("sub_videos").textContent = '';

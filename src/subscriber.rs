@@ -322,48 +322,40 @@ impl SubscriberDetails {
         Box::new(move |s: RTCPeerConnectionState| {
             let _enter = span.enter();  // populate user & room info in following logs
             info!("PeerConnection State has changed: {}", s);
-            if s == RTCPeerConnectionState::Failed {
-                // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
-                // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
-                // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-                info!("Peer Connection has gone to failed exiting: Done forwarding");
+            match s {
+                RTCPeerConnectionState::Connected => {
+                    let now = std::time::SystemTime::now();
+                    let duration = match now.duration_since(created) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            error!("system time error: {}", e);
+                            Duration::from_secs(42) // fake one for now
+                        },
+                    }.as_millis();
 
-                // also do state cleanup here
-                // in case we didn't go through disconnected and become failed directly
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    catch(SHARED_STATE.remove_subscriber(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
-            }
+                    info!("Peer Connection connected! spent {} ms from created", duration);
 
-            if s == RTCPeerConnectionState::Disconnected {
-                notify_close.notify_waiters();
+                    let room = room.clone();
+                    let user = user.clone();
+                    return Box::pin(async move {
+                        catch(SHARED_STATE.add_subscriber(&room, &user)).await;
+                    }.instrument(tracing::Span::current()));
+                },
+                RTCPeerConnectionState::Failed |
+                RTCPeerConnectionState::Disconnected |
+                RTCPeerConnectionState::Closed => {
+                    // NOTE:
+                    // In disconnected state, PeerConnection may still come back, e.g. reconnect using an ICE Restart.
+                    // But let's cleanup everything for now.
+                    notify_close.notify_waiters();
 
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    catch(SHARED_STATE.remove_subscriber(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
-            }
-
-            if s == RTCPeerConnectionState::Connected {
-                let now = std::time::SystemTime::now();
-                let duration = match now.duration_since(created) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        error!("system time error: {}", e);
-                        Duration::from_secs(42) // fake one for now
-                    },
-                }.as_millis();
-
-                info!("Peer Connection connected! spent {} ms from created", duration);
-
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    catch(SHARED_STATE.add_subscriber(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
+                    let room = room.clone();
+                    let user = user.clone();
+                    return Box::pin(async move {
+                        catch(SHARED_STATE.remove_subscriber(&room, &user)).await;
+                    }.instrument(tracing::Span::current()));
+                },
+                _ => {}
             }
 
             Box::pin(async {})
@@ -609,14 +601,17 @@ impl SubscriberDetails {
                         dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await.unwrap();
                     }
                 }.instrument(span.clone()));
-            }
-
-            // FIXME: remove this?
-            if msg_str.starts_with("RENEGOTIATION") {
+            } else if msg_str.starts_with("RENEGOTIATION") {
+                // FIXME: remove this?
                 let notify_sender = notify_sender.clone();
                 return Box::pin(async move {
                     notify_sender.send("RENEGOTIATION".to_string()).await.unwrap();
                 });
+            } else if msg_str == "STOP" {
+                info!("actively close peer connection");
+                return Box::pin(async move {
+                    let _ = pc.close().await;
+                }.instrument(span.clone()));
             }
 
             Box::pin(async {})
