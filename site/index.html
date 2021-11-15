@@ -86,8 +86,9 @@ window.createSubscriber = () => {
 room: <input id="run_pub_room" type="text"></input><br/>
 id: <input id="run_pub_id" type="text"></input><br/>
 token: <input id="run_pub_token" type="text"></input><br/>
-<button onclick="window.runPublisher()">Run Publisher</button><br/><br/>
-<button id="run_pub_screenshare"> Start Screen Share </button>
+<button id="run_pub_start" onclick="window.runPublisher()">Run Publisher</button>
+<button id="run_pub_stop" hidden>Stop Publisher</button><br/><br/>
+<button id="run_pub_screenshare" hidden> Start Screen Share </button>
 <button id="run_pub_screenshare_stop" hidden> Stop Screen Share </button><br />
 <video id="pub_video" width="160" height="120" autoplay muted></video><br />
 <video id="pub_video_screenshare" width="160" height="120" autoplay muted></video><br />
@@ -101,6 +102,10 @@ Logs:<br/>
 <div id="run_pub_log"></div>
 <script>
 window.runPublisher = () => {
+  document.getElementById("run_pub_start").hidden = true;
+  document.getElementById("run_pub_stop").hidden = false;
+  document.getElementById("run_pub_screenshare").hidden = false;
+
   let log = msg => {
     document.getElementById("run_pub_log").innerHTML += msg + "<br>"
   }
@@ -229,6 +234,14 @@ window.runPublisher = () => {
       }).catch(log);
   }
 
+  document.getElementById("run_pub_stop").onclick = () => {
+    document.getElementById("run_pub_start").hidden = false;
+    document.getElementById("run_pub_stop").hidden = true;
+    document.getElementById("run_pub_screenshare").hidden = true;
+    document.getElementById("pub_video").srcObject = null;
+    pub_pc.close();
+  }
+
   document.getElementById("run_pub_screenshare_stop").onclick = () => {
     document.getElementById("run_pub_screenshare").hidden = false;
     document.getElementById("run_pub_screenshare_stop").hidden = true;
@@ -249,7 +262,8 @@ local offer: <br/><textarea id="subLocalSessionDescription" readonly="true"></te
 remote answer: <br/><textarea id="subRemoteSessionDescription" readonly="true"></textarea><br/>
 selected local candidate: <div id="run_sub_local_ice"></div>
 selected remote candidate: <div id="run_sub_remote_ice"></div>
-<button onclick="window.runSubscriber()"> Start Session </button><br />
+<button id="run_sub_start" onclick="window.runSubscriber()"> Start Session </button>
+<button id="run_sub_stop" hidden>Stop Session</button><br/><br/>
 <br/>
 Video<br/>
 <div id="sub_videos"></div><br/><br />
@@ -259,6 +273,9 @@ Logs<br/>
 <div id="sub_log"></div>
 <script>
 window.runSubscriber = () => {
+  document.getElementById("run_sub_start").hidden = true;
+  document.getElementById("run_sub_stop").hidden = false;
+
   let log = msg => {
     document.getElementById("sub_log").innerHTML += msg + "<br>"
   };
@@ -494,6 +511,13 @@ window.runSubscriber = () => {
       });
     })
     .catch(log);
+
+  document.getElementById("run_sub_stop").onclick = () => {
+    document.getElementById("run_sub_start").hidden = false;
+    document.getElementById("run_sub_stop").hidden = true;
+    document.getElementById("sub_videos").textContent = '';
+    sub_pc.close();
+  }
 }
 </script>
 
