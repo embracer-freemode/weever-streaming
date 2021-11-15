@@ -22,7 +22,7 @@ tokio = { version = "1.13.0", features = ["full"] }
 clap = "3.0.0-beta.5"
 redis = { version = "0.21.4", features = ["tokio-comp"] }
 # WebRTC
-webrtc = { git = "https://github.com/webrtc-rs/webrtc", rev = "91669be" }
+webrtc = { git = "https://github.com/webrtc-rs/webrtc", rev = "d9c1eca" }
 # tracing ecosystem
 tracing = "0.1.29"
 tracing-appender = "0.2.0"
