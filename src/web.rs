@@ -127,12 +127,22 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
         return "id should be ascii graphic";
     }
 
+    // "." will conflict with NATS subject seperator
+    if params.id.contains('.') {
+        return "id should not contain '.'";
+    }
+
     if params.room.is_empty() {
         return "room should not be empty";
     }
 
     if !params.room.chars().all(|c| c.is_ascii_graphic()) {
         return "room should be ascii graphic";
+    }
+
+    // "." will conflict with NATS subject seperator
+    if params.room.contains('.') {
+        return "room should not contain '.'";
     }
 
     if let Some(token) = params.token.clone() {
@@ -156,12 +166,22 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
         return "id should be ascii graphic";
     }
 
+    // "." will conflict with NATS subject seperator
+    if params.id.contains('.') {
+        return "id should not contain '.'";
+    }
+
     if params.room.is_empty() {
         return "room should not be empty";
     }
 
     if !params.room.chars().all(|c| c.is_ascii_graphic()) {
         return "room should be ascii graphic";
+    }
+
+    // "." will conflict with NATS subject seperator
+    if params.room.contains('.') {
+        return "room should not contain '.'";
     }
 
     if let Some(token) = params.token.clone() {
@@ -188,12 +208,22 @@ async fn publish(auth: BearerAuth,
         return "id should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
+    // "." will conflict with NATS subject seperator
+    if id.contains('.') {
+        return "id should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
     if room.is_empty() {
         return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
         return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
+    // "." will conflict with NATS subject seperator
+    if room.contains('.') {
+        return "room should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -270,12 +300,22 @@ async fn subscribe(auth: BearerAuth,
         return "id should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
+    // "." will conflict with NATS subject seperator
+    if id.contains('.') {
+        return "id should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
     if room.is_empty() {
         return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
         return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
+    // "." will conflict with NATS subject seperator
+    if room.contains('.') {
+        return "room should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
