@@ -195,6 +195,7 @@ window.runPublisher = () => {
 
   // TODO: don't create new PC
   var pub_screen_pc;
+  var sendChannelScreen;
 
   document.getElementById("run_pub_screenshare").onclick = () => {
 
@@ -207,6 +208,8 @@ window.runPublisher = () => {
         pub_screen_pc = new RTCPeerConnection({
           iceServers: window.getIceServers(),
         });
+
+        sendChannelScreen = pub_screen_pc.createDataChannel("control");
 
         let room = document.getElementById("run_pub_room").value;
         let token = document.getElementById("run_pub_token").value;
@@ -247,7 +250,7 @@ window.runPublisher = () => {
   }
 
   document.getElementById("run_pub_screenshare_stop").onclick = () => {
-    // TODO: proactive stop session, send "STOP" via datachannel
+    sendChannelScreen.send("STOP");
     document.getElementById("run_pub_screenshare").hidden = false;
     document.getElementById("run_pub_screenshare_stop").hidden = true;
     document.getElementById("pub_video_screenshare").srcObject = null;
