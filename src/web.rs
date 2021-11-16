@@ -67,8 +67,21 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
             let cors_domain = cli.cors_domain.clone();
             // set CORS for easier frontend development
             let cors = Cors::default()
-                .allowed_origin("http://localhost:8080")
-                .allowed_origin("https://localhost:8443")
+                .allowed_origin_fn(move |origin, _req_head| {
+                    // allow any localhost for frontend local development
+                    // e.g. "http://localhost" or "https://localhost" or "https://localhost:3000"
+                    let domain = origin.to_str()
+                                       .unwrap_or("")
+                                       .splitn(3, ':')
+                                       .skip(1)
+                                       .take(1)
+                                       .next()
+                                       .unwrap_or("");
+                    match domain {
+                        "//localhost" => true,
+                        _ => false,
+                    }
+                })
                 .allowed_origin_fn(move |origin, _req_head| {
                     origin.to_str()
                         .unwrap_or("")
