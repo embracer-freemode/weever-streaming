@@ -47,6 +47,42 @@ Cons:
 
 
 
+SFU Design
+========================================
+
+1 HTTP POST to connect
+------------------------------
+
+There is no complex negotiation and setting.
+We use single HTTP POST request with SDP offer from client to connect WebRTC.
+Server will provide SDP answer in HTTP response.
+Then following communication will based on the data channel.
+
+
+Connection first, renegotiate media later
+-----------------------------------------
+
+We choose to setup WebRTC connection first.
+Don't care too much about how many media we want.
+We start WebRTC connection with only 1 data channel.
+After the WebRTC become connected,
+server will send current room's media info via data channel.
+Then we setup the media flow via WebRTC renegotiation.
+
+
+Every PeerConnection will use unique id
+---------------------------------------
+
+WebRTC's track stop/resume/...etc are a bit complex to control.
+And reuse RTP sender with replace track has rendering state problem.
+To simplify the case, we use unique id for every PeerConnection.
+Same user will use a random string as suffix everytime the client connects.
+So the clients are actually all different. No reuse problem.
+
+However, this come with the cost that a subscriber in the room will gradually have bigger SDP when publishers come and go.
+
+
+
 WebRTC specs
 ========================================
 
@@ -54,6 +90,21 @@ WebRTC specs
 * [Web Real-Time Communications Working Group Charter](https://w3c.github.io/webrtc-charter/webrtc-charter.html)
 * [W3C - WebRTC 1.0: Real-Time Communication Between Browsers](https://www.w3.org/TR/webrtc/)
 * [W3C - WebRTC Next Version Use Cases](https://www.w3.org/TR/webrtc-nv-use-cases/)
+    - multiparty online game with voice communications
+    - mobile calling service
+    - video conferencing with a central server
+    - file sharing
+    - internet of things
+    - funny hats effect
+    - machine learning
+    - virtual reality gaming
+    - requirements
+        + N01: ICE candidates control, e.g. gathering and pruning
+        + N02: multiple connections with one offer
+        + N03: congestion control for audio quality and latency betweeen multiple connections
+        + N04: move traffic between multiple ICE candidates
+        + N05: ICE candidates will consider network cost when doing re-routing
+        + ...
 * [W3C - Scalable Video Coding (SVC) Extension for WebRTC](https://www.w3.org/TR/webrtc-svc/)
     - SST (Single-Session Transmission)
     - MST (Multi-Session Transmission)
@@ -63,6 +114,7 @@ WebRTC specs
         + "S2T3" means 2 Spatial Layers & 3 Temporal Layers & No Inter-layer dependency (Simulcast)
     - `scalabilityMode`
 * [W3C - Screen Capture](https://www.w3.org/TR/screen-capture/)
+    - `navigator.mediaDevices.getDisplayMedia`
 * [W3C - MediaStreamTrack Content Hints](https://www.w3.org/TR/mst-content-hint/)
     - audio: "", "speech", "speech-recognition", "music"
     - video: "", "motion", "detail", "text"
@@ -462,8 +514,13 @@ Files
 ├── Dockerfile    # container build setup
 ├── README.md
 └── src           # main code
-   ├── cli.rs     # CLI/env options
-   └── lib.rs     # WebRTC & web server
+   ├── cli.rs         # CLI/env options
+   ├── helper.rs      # small utils
+   ├── lib.rs         # entry point
+   ├── publisher.rs   # WebRTC as media publisher
+   ├── state.rs       # global sharing states across instances
+   ├── subscriber.rs  # WebRTC as media subscriber
+   └── web.rs         # web server
 ```
 
 Docs site
