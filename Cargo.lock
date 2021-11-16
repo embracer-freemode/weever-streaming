@@ -3558,8 +3558,8 @@ dependencies = [
 
 [[package]]
 name = "webrtc"
-version = "0.3.0"
-source = "git+https://github.com/webrtc-rs/webrtc?rev=d9c1eca#d9c1eca62fdc7e29950d8695fd63ecba489bef75"
+version = "0.3.1"
+source = "git+https://github.com/webrtc-rs/webrtc?rev=6fc9ddb#6fc9ddb22e40886a1d1e5a6572b4067399634297"
 dependencies = [
  "async-trait",
  "bytes",
