@@ -144,12 +144,6 @@ window.runPublisher = () => {
     }
   }
 
-  pub_pc.onicecandidate = event => {
-    if (event.candidate === null) {
-      document.getElementById("pubLocalSessionDescription").value = pub_pc.localDescription.sdp
-    }
-  }
-
   let sendChannel = pub_pc.createDataChannel("control")
   sendChannel.onclose = () => console.log("sendChannel has closed")
   sendChannel.onopen = () => console.log("sendChannel has opened")
@@ -180,6 +174,7 @@ window.runPublisher = () => {
       pub_pc.createOffer()
         .then(offer => {
           pub_pc.setLocalDescription(offer);
+          document.getElementById("pubLocalSessionDescription").value = offer.sdp;
           fetch(`/pub/${room}/${id}`, {
             method: "POST",
             headers: {
@@ -331,12 +326,6 @@ window.runSubscriber = () => {
           }
         })
       })
-    }
-  }
-
-  sub_pc.onicecandidate = event => {
-    if (event.candidate === null) {
-      document.getElementById("subLocalSessionDescription").value = sub_pc.localDescription.sdp
     }
   }
 
