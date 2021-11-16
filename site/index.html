@@ -1,3 +1,13 @@
+<script>
+window.getIceServers = () => {
+    return [
+      {
+        urls: "stun:stun.l.google.com:19302"
+      },
+      // also TURN servers here
+    ];
+}
+</script>
 <h2>Create publisher (per publisher security token setting for pushing streams)</h2>
 (this will only be called from other in-cluster service for settings)<br/>
 room: <input id="create_pub_room" type="text"></input><br/>
@@ -111,12 +121,7 @@ window.runPublisher = () => {
   }
 
   let pub_pc = new RTCPeerConnection({
-    iceServers: [
-      {
-        urls: "stun:stun.l.google.com:19302"
-      },
-      // also TURN servers here
-    ]
+    iceServers: window.getIceServers(),
   })
 
   pub_pc.oniceconnectionstatechange = e => {
@@ -205,17 +210,7 @@ window.runPublisher = () => {
       .then(stream => {
 
         pub_screen_pc = new RTCPeerConnection({
-          iceServers: [
-            {
-              urls: "stun:stun.l.google.com:19302"
-            },
-            // also TURN servers here
-            {
-              urls: "turn:turn.qonver.com:3478?transport=udp",
-              username: "qonver_janus_user",
-              credential: "user-janus-qonver-975d1705-e543-4735-a89f-a3518a690f02"
-            }
-          ]
+          iceServers: window.getIceServers(),
         });
 
         let room = document.getElementById("run_pub_room").value;
@@ -296,12 +291,7 @@ window.runSubscriber = () => {
   };
 
   let sub_pc = new RTCPeerConnection({
-    iceServers: [
-      {
-        urls: "stun:stun.l.google.com:19302"
-      },
-      // also TURN servers here
-    ]
+    iceServers: window.getIceServers(),
   });
 
   // for easier debug and trial only
