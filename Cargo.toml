@@ -30,8 +30,8 @@ tracing-log = "0.1.2"
 tracing-subscriber = { version = "0.3.1", features = ["fmt", "env-filter"] }
 console-subscriber = { git = "https://github.com/tokio-rs/console", rev = "a30264e" }
 # web server
-actix-web = { version = "4.0.0-beta.10", features = ["rustls"] } # web framework
-actix-web-httpauth = { git = "https://github.com/actix/actix-extras", rev = "477b0f8" }   # bearerer token
+actix-web = { version = "4.0.0-beta.11", features = ["rustls"] } # web framework
+actix-web-httpauth = { version = "0.6.0-beta.3" }   # bearerer token
 actix-files = "0.6.0-beta.8"    # static files
 actix-cors = "0.6.0-beta.3"     # CORS setting (for easier frontend local development)
 rustls = "0.20.0"               # SSL

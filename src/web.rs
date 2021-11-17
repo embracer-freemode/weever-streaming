@@ -24,7 +24,7 @@ use rustls_pemfile::{certs, pkcs8_private_keys};
 
 
 /// Web server for communicating with web clients
-#[actix_web::main]
+#[tokio::main]
 pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     // load ssl keys
     let raw_certs = &mut std::io::BufReader::new(
