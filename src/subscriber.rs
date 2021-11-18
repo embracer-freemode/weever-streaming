@@ -1,3 +1,6 @@
+//! Run as publisher in the room.
+//! We will extract RTP from NATS and send via WebRTC streams.
+
 use crate::state::{SharedState, SHARED_STATE, Command};
 use crate::helper::catch;
 use crate::cli;
@@ -275,7 +278,8 @@ impl SubscriberDetails {
             // Read incoming RTCP packets
             // Before these packets are returned they are processed by interceptors. For things
             // like NACK this needs to be called.
-            self.spawn_rtcp_reader(rtp_sender);
+            // NOTE: disable RTCP reader for now
+            // self.spawn_rtcp_reader(rtp_sender);
         }
 
         Ok(())
