@@ -302,6 +302,10 @@ impl SubscriberDetails {
         self.notify_receiver = Some(receiver);
     }
 
+    fn deregister_notify_message(&mut self) {
+        SHARED_STATE.remove_sub_notify(&self.room, &self.user);
+    }
+
     fn on_ice_connection_state_change(&self) -> OnICEConnectionStateChangeHdlrFn {
         let span = tracing::Span::current();
         Box::new(move |connection_state: RTCIceConnectionState| {
@@ -916,6 +920,7 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
     let max_time = Duration::from_secs(3 * 60 * 60);
     timeout(max_time, subscriber.notify_close.notified()).await?;
     peer_connection.close().await?;
+    subscriber.deregister_notify_message();
     // remove all spawned tasks
     for task in subscriber.tokio_tasks.read().unwrap().iter() {
         task.abort();
