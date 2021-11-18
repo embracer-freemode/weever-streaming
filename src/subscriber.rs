@@ -1,5 +1,4 @@
-use crate::state::SHARED_STATE;
-use crate::state::SharedState;
+use crate::state::{SharedState, SHARED_STATE, Command};
 use crate::helper::catch;
 use crate::cli;
 use anyhow::{Result, Context, anyhow};
@@ -81,8 +80,8 @@ struct SubscriberDetails {
     user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
     user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
     rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-    notify_sender: Option<mpsc::Sender<String>>,
-    notify_receiver: Option<mpsc::Receiver<String>>,
+    notify_sender: Option<mpsc::Sender<Command>>,
+    notify_receiver: Option<mpsc::Receiver<Command>>,
     created: std::time::SystemTime,
     tokio_tasks: Arc<RwLock<Vec<JoinHandle<()>>>>,
 }
@@ -104,7 +103,7 @@ impl SubscriberDetails {
         format!("rtc.{}.*.*.*", self.room)
     }
 
-    async fn create_pc(stun: String,
+    async fn create_pc(_stun: String,
                        turn: Option<String>,
                        turn_username: Option<String>,
                        turn_password: Option<String>,
@@ -286,6 +285,7 @@ impl SubscriberDetails {
     /// Before these packets are returned they are processed by interceptors.
     /// For things like NACK this needs to be called.
     fn spawn_rtcp_reader(&self, rtp_sender: Arc<RTCRtpSender>) {
+        // NOTE: busy loop
         self.tokio_tasks.write().unwrap().push(tokio::spawn(async move {
             let mut rtcp_buf = vec![0u8; 1500];
             info!("running RTP sender read");
@@ -297,7 +297,7 @@ impl SubscriberDetails {
     fn register_notify_message(&mut self) {
         // set notify
         let (sender, receiver) = mpsc::channel(10);
-        SHARED_STATE.set_sub_notify(&self.room, &self.user, sender.clone());
+        SHARED_STATE.add_sub_notify(&self.room, &self.user, sender.clone());
         self.notify_sender = Some(sender);
         self.notify_receiver = Some(receiver);
     }
@@ -347,6 +347,7 @@ impl SubscriberDetails {
                     // NOTE:
                     // In disconnected state, PeerConnection may still come back, e.g. reconnect using an ICE Restart.
                     // But let's cleanup everything for now.
+                    info!("send close notification");
                     notify_close.notify_waiters();
 
                     let room = room.clone();
@@ -378,7 +379,6 @@ impl SubscriberDetails {
         let notify_message = Arc::new(tokio::sync::Mutex::new(self.notify_receiver.take().unwrap()));
         let user_media_to_tracks = self.user_media_to_tracks.clone();
         let user_media_to_senders = self.user_media_to_senders.clone();
-        let notify_sender = self.notify_sender.as_ref().unwrap().clone();
         let room = self.room.clone();
         let user = self.user.clone();
 
@@ -405,8 +405,7 @@ impl SubscriberDetails {
                 rtp_senders.clone(),
                 notify_message.clone(),
                 user_media_to_tracks.clone(),
-                user_media_to_senders.clone(),
-                notify_sender.clone())
+                user_media_to_senders.clone())
         })
     }
 
@@ -419,10 +418,9 @@ impl SubscriberDetails {
             dc_id: String,
             tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
             rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-            notify_message: Arc<tokio::sync::Mutex<mpsc::Receiver<String>>>,
+            notify_message: Arc<tokio::sync::Mutex<mpsc::Receiver<Command>>>,
             user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-            notify_sender: mpsc::Sender<String>)
+            user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>)
         -> Pin<Box<tracing::instrument::Instrumented<impl std::future::Future<Output = ()>>>> {
 
         Box::pin(async move {
@@ -444,8 +442,7 @@ impl SubscriberDetails {
             dc.on_message(Self::on_data_channel_msg(
                     wpc,
                     dc.clone(),
-                    dc_label,
-                    notify_sender))
+                    dc_label))
                 .instrument(tracing::Span::current()).await;
         }.instrument(tracing::Span::current()))
     }
@@ -458,7 +455,7 @@ impl SubscriberDetails {
                               dc_id: String,
                               tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
                               rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-                              notify_message: Arc<tokio::sync::Mutex<mpsc::Receiver<String>>>,
+                              notify_message: Arc<tokio::sync::Mutex<mpsc::Receiver<Command>>>,
                               user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
                               user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>) -> OnOpenHdlrFn {
         let span = tracing::Span::current();
@@ -488,73 +485,46 @@ impl SubscriberDetails {
                         // we get data before timeout
                         let media = SHARED_STATE.get_user_track_to_mime(&room).await.unwrap();
 
-                        let msg = msg.unwrap();
-                        info!("cmd from internal sender: {}", msg);
+                        let cmd = msg.unwrap();
+                        info!("cmd from internal sender: {:?}", cmd);
+                        let msg = cmd.to_user_msg();
 
-                        if msg.starts_with("PUB_LEFT ") {
-                            // NOTE: we don't delete track for now
-                            //       when publisher rejoin, we will replace tracks
+                        match cmd {
+                            Command::PubJoin(join_user) => {
+                                Self::on_pub_join(
+                                    room.clone(),
+                                    join_user.to_string(),
+                                    user.clone(),
+                                    pc.clone(),
+                                    media.clone(),
+                                    tracks.clone(),
+                                    rtp_senders.clone(),
+                                    user_media_to_tracks.clone(),
+                                    user_media_to_senders.clone(),
+                                ).await;
 
-                            // let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
-                            // Self::on_pub_leave(
-                            //     left_user.to_string(),
-                            //     room.clone(),
-                            //     pc.clone(),
-                            //     media.clone(),
-                            //     tracks.clone(),
-                            //     rtp_senders.clone(),
-                            //     user_media_to_tracks.clone(),
-                            //     user_media_to_senders.clone(),
-                            // ).await;
+                                Self::send_data(dc.clone(), msg).await.unwrap();
+                                result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                            },
+                            Command::PubLeft(_user) => {
+                                // NOTE: we don't delete track for now
+                                //       when publisher rejoin, we will replace tracks
 
-                            Self::send_data(dc.clone(), msg).await.unwrap();
-                            result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                                // let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
+                                // Self::on_pub_leave(
+                                //     left_user.to_string(),
+                                //     room.clone(),
+                                //     pc.clone(),
+                                //     media.clone(),
+                                //     tracks.clone(),
+                                //     rtp_senders.clone(),
+                                //     user_media_to_tracks.clone(),
+                                //     user_media_to_senders.clone(),
+                                // ).await;
 
-                        } else if msg.starts_with("PUB_JOIN ") {
-                            let join_user = msg.splitn(2, " ").skip(1).next().unwrap();
-                            Self::on_pub_join(
-                                room.clone(),
-                                join_user.to_string(),
-                                user.clone(),
-                                pc.clone(),
-                                media.clone(),
-                                tracks.clone(),
-                                rtp_senders.clone(),
-                                user_media_to_tracks.clone(),
-                                user_media_to_senders.clone(),
-                            ).await;
-
-                            Self::send_data(dc.clone(), msg).await.unwrap();
-                            result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
-
-                        } else if msg == "PUB_MEDIA_ADD " {
-                            // PUB_MEDIA_ADD user mime app_id
-                            let mut it = msg.splitn(4, " ").skip(1);
-                            let pub_user = it.next().unwrap();
-                            let mime = it.next().unwrap();
-                            let app_id = it.next().unwrap();    // e.g. screen
-
-                            // FIXME: quick hack to get one video for screen share
-                            Self::on_pub_media_add(
-                                room.clone(),
-                                pub_user.to_string(),
-                                mime.to_string(),
-                                app_id.to_string(),
-                                pc.clone(),
-                                media.clone(),
-                                tracks.clone(),
-                                rtp_senders.clone(),
-                                user_media_to_tracks.clone(),
-                                user_media_to_senders.clone()).await;
-
-                            Self::send_data(dc.clone(), msg).await.unwrap();
-                            result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
-
-                        } else if msg == "RENEGOTIATION" {
-                            // quick hack for triggering renegotiation no matter why
-                            result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
-                        } else {
-                            result = Self::send_data(dc.clone(), msg).await;
+                                Self::send_data(dc.clone(), msg).await.unwrap();
+                                result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                            },
                         }
                     } else {
                         result = Self::send_data(dc.clone(), "PING".to_string()).await;
@@ -566,7 +536,7 @@ impl SubscriberDetails {
         })
     }
 
-    fn on_data_channel_msg(wpc: WeakPeerConnection, dc: Arc<RTCDataChannel>, dc_label: String, notify_sender: mpsc::Sender<String>) -> OnMessageHdlrFn {
+    fn on_data_channel_msg(wpc: WeakPeerConnection, dc: Arc<RTCDataChannel>, dc_label: String) -> OnMessageHdlrFn {
         let span = tracing::Span::current();
         Box::new(move |msg: DataChannelMessage| {
             let _enter = span.enter();  // populate user & room info in following logs
@@ -577,7 +547,6 @@ impl SubscriberDetails {
             };
 
             let dc = dc.clone();
-            let notify_sender = notify_sender.clone();
 
             let msg_str = String::from_utf8(msg.data.to_vec()).unwrap();
             info!("Message from DataChannel '{}': '{:.20}'", dc_label, msg_str);
@@ -601,12 +570,6 @@ impl SubscriberDetails {
                         dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await.unwrap();
                     }
                 }.instrument(span.clone()));
-            } else if msg_str.starts_with("RENEGOTIATION") {
-                // FIXME: remove this?
-                let notify_sender = notify_sender.clone();
-                return Box::pin(async move {
-                    notify_sender.send("RENEGOTIATION".to_string()).await.unwrap();
-                });
             } else if msg_str == "STOP" {
                 info!("actively close peer connection");
                 return Box::pin(async move {
@@ -742,87 +705,6 @@ impl SubscriberDetails {
         }
     }
 
-    async fn on_pub_media_add(
-            room: String,
-            pub_user: String,
-            mime: String,
-            app_id: String,
-            pc: Arc<RTCPeerConnection>,
-            media: HashMap<(String, String), String>,
-            tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-            user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>) {
-
-        // add new track
-        // TODO: consider reuse case
-
-        info!("pub media add: {}", mime);
-
-        let mime = match mime.as_ref() {
-            "video" => MIME_TYPE_VP8,
-            "audio" => MIME_TYPE_OPUS,
-            _ => unreachable!(),
-        };
-
-        info!("add new track for {} {}", pub_user, app_id);
-
-        let track = Arc::new(TrackLocalStaticRTP::new(
-            RTCRtpCodecCapability {
-                mime_type: mime.to_owned(),
-                ..Default::default()
-            },
-            // id is the unique identifier for this Track.
-            // This should be unique for the stream, but doesn’t have to globally unique.
-            // A common example would be 'audio' or 'video' or 'desktop' or 'webcam'
-            app_id.to_string(),     // msid, application id part
-            // stream_id is the group this track belongs too.
-            // This must be unique.
-            pub_user.to_string(),   // msid, group id part
-        ));
-
-        // for later dyanmic RTP dispatch from NATS
-        tracks.write().unwrap().insert((pub_user.to_string(), app_id.to_string()), track.clone());
-
-        // TODO: cleanup old track
-        user_media_to_tracks.write().unwrap().entry((pub_user.to_string(), app_id.to_string()))
-            .and_modify(|e| *e = track.clone())
-            .or_insert(track.clone());
-
-        let sender = {
-            let user_media_to_senders = user_media_to_senders.read().unwrap();
-            user_media_to_senders.get(&(pub_user.to_string(), app_id.to_string())).cloned().clone()
-        };
-
-        // add tracck to pc
-        // insert rtp sender to cache
-        let pc = Arc::clone(&pc);
-        let pub_user = pub_user.clone();
-        let app_id = app_id.clone();
-        let track = track.clone();
-        let rtp_senders = rtp_senders.clone();
-        let user_media_to_senders = user_media_to_senders.clone();
-
-        // NOTE: make sure the track is added before leaving this function
-        let rtp_sender = pc
-            .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
-            .await.unwrap();
-
-        // Read incoming RTCP packets
-        // Before these packets are returned they are processed by interceptors. For things
-        // like NACK this needs to be called.
-        tokio::spawn(async move {
-            info!("create new rtp sender for {} {}", pub_user, app_id);
-            rtp_senders.write().unwrap().insert((pub_user.clone(), app_id.clone()), rtp_sender.clone());
-            user_media_to_senders.write().unwrap().insert((pub_user.clone(), app_id.to_string()), rtp_sender.clone());
-            let mut rtcp_buf = vec![0u8; 1500];
-            while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-            info!("leaving RTP sender read");
-            Result::<()>::Ok(())
-        }.instrument(tracing::Span::current()));
-    }
-
-
     #[allow(dead_code)]
     async fn on_pub_leave(
             left_user: String,
@@ -894,6 +776,7 @@ impl SubscriberDetails {
         let tracks = self.tracks.clone();
 
         // Read RTP packets forever and send them to the WebRTC Client
+        // NOTE: busy loop
         self.tokio_tasks.write().unwrap().push(tokio::spawn(async move {
             use webrtc::Error;
             while let Some(msg) = sub.next().await {
