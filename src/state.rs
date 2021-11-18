@@ -339,8 +339,9 @@ impl SharedState for State {
     // TODO: remove all send_pub_* methods
     async fn send_command(&self, room: &str, cmd: Command) -> Result<()> {
         let subject = format!("cmd.{}", room);
-        let mut slice = [0u8; 16];
-        let length = bincode::encode_into_slice(cmd, &mut slice, Configuration::standard()).context("encode command error")?;
+        let mut slice = [0u8; 64];
+        let length = bincode::encode_into_slice(&cmd, &mut slice, Configuration::standard())
+            .with_context(|| format!("encode command error: {:?}", cmd))?;
         let payload = &slice[..length];
         let nats = self.get_nats().context("get NATS client failed")?;
         nats.publish(&subject, payload).await.context("publish PUB_JOIN to NATS failed")?;
