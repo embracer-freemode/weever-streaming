@@ -18,6 +18,7 @@ use actix_web::{
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use actix_files::Files;
+use actix_cors::Cors;
 use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 
@@ -63,9 +64,37 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     let url = format!("{}:{}", cli.host, cli.port);
     HttpServer::new(move || {
             let data = web::Data::new(cli.clone());
+            let cors_domain = cli.cors_domain.clone();
+            // set CORS for easier frontend development
+            let cors = Cors::default()
+                .allowed_origin_fn(move |origin, _req_head| {
+                    // allow any localhost for frontend local development
+                    // e.g. "http://localhost" or "https://localhost" or "https://localhost:3000"
+                    let domain = origin.to_str()
+                                       .unwrap_or("")
+                                       .splitn(3, ':')
+                                       .skip(1)
+                                       .take(1)
+                                       .next()
+                                       .unwrap_or("");
+                    match domain {
+                        "//localhost" => true,
+                        _ => false,
+                    }
+                })
+                .allowed_origin_fn(move |origin, _req_head| {
+                    origin.to_str()
+                        .unwrap_or("")
+                        .ends_with(&cors_domain)
+                })
+                .allowed_methods(vec!["GET", "POST"])
+                .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
+                .allowed_header(header::CONTENT_TYPE);
+
             App::new()
                 // enable logger
                 .wrap(actix_web::middleware::Logger::default())
+                .wrap(cors)
                 .app_data(data)
                 .service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
                 .service(create_pub)
@@ -111,12 +140,22 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
         return "id should be ascii graphic";
     }
 
+    // "." will conflict with NATS subject seperator
+    if params.id.contains('.') {
+        return "id should not contain '.'";
+    }
+
     if params.room.is_empty() {
         return "room should not be empty";
     }
 
     if !params.room.chars().all(|c| c.is_ascii_graphic()) {
         return "room should be ascii graphic";
+    }
+
+    // "." will conflict with NATS subject seperator
+    if params.room.contains('.') {
+        return "room should not contain '.'";
     }
 
     if let Some(token) = params.token.clone() {
@@ -140,12 +179,22 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
         return "id should be ascii graphic";
     }
 
+    // "." will conflict with NATS subject seperator
+    if params.id.contains('.') {
+        return "id should not contain '.'";
+    }
+
     if params.room.is_empty() {
         return "room should not be empty";
     }
 
     if !params.room.chars().all(|c| c.is_ascii_graphic()) {
         return "room should be ascii graphic";
+    }
+
+    // "." will conflict with NATS subject seperator
+    if params.room.contains('.') {
+        return "room should not contain '.'";
     }
 
     if let Some(token) = params.token.clone() {
@@ -172,12 +221,22 @@ async fn publish(auth: BearerAuth,
         return "id should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
+    // "." will conflict with NATS subject seperator
+    if id.contains('.') {
+        return "id should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
     if room.is_empty() {
         return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
         return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
+    // "." will conflict with NATS subject seperator
+    if room.contains('.') {
+        return "room should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -254,12 +313,22 @@ async fn subscribe(auth: BearerAuth,
         return "id should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
+    // "." will conflict with NATS subject seperator
+    if id.contains('.') {
+        return "id should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
     if room.is_empty() {
         return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
         return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+    }
+
+    // "." will conflict with NATS subject seperator
+    if room.contains('.') {
+        return "room should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"

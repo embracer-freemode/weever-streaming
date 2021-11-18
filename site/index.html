@@ -1,3 +1,13 @@
+<script>
+window.getIceServers = () => {
+    return [
+      {
+        urls: "stun:stun.l.google.com:19302"
+      },
+      // also TURN servers here
+    ];
+}
+</script>
 <h2>Create publisher (per publisher security token setting for pushing streams)</h2>
 (this will only be called from other in-cluster service for settings)<br/>
 room: <input id="create_pub_room" type="text"></input><br/>
@@ -86,8 +96,9 @@ window.createSubscriber = () => {
 room: <input id="run_pub_room" type="text"></input><br/>
 id: <input id="run_pub_id" type="text"></input><br/>
 token: <input id="run_pub_token" type="text"></input><br/>
-<button onclick="window.runPublisher()">Run Publisher</button><br/><br/>
-<button id="run_pub_screenshare"> Start Screen Share </button>
+<button id="run_pub_start" onclick="window.runPublisher()">Run Publisher</button>
+<button id="run_pub_stop" hidden>Stop Publisher</button><br/><br/>
+<button id="run_pub_screenshare" hidden> Start Screen Share </button>
 <button id="run_pub_screenshare_stop" hidden> Stop Screen Share </button><br />
 <video id="pub_video" width="160" height="120" autoplay muted></video><br />
 <video id="pub_video_screenshare" width="160" height="120" autoplay muted></video><br />
@@ -95,42 +106,75 @@ local offer: <br/><textarea id="pubLocalSessionDescription" readonly="true"></te
 <br/>
 remote answer: <br/><textarea id="pubRemoteSessionDescription" readonly="true"></textarea>
 <br/>
+selected local candidate: <div id="run_pub_local_ice"></div>
+selected remote candidate: <div id="run_pub_remote_ice"></div>
 Logs:<br/>
 <div id="run_pub_log"></div>
 <script>
 window.runPublisher = () => {
+  document.getElementById("run_pub_start").hidden = true;
+  document.getElementById("run_pub_stop").hidden = false;
+  document.getElementById("run_pub_screenshare").hidden = false;
+
   let log = msg => {
     document.getElementById("run_pub_log").innerHTML += msg + "<br>"
   }
 
   let pub_pc = new RTCPeerConnection({
-    iceServers: [
-      {
-        urls: "stun:stun.l.google.com:19302"
-      },
-      // also TURN servers here
-    ]
+    iceServers: window.getIceServers(),
   })
 
-  pub_pc.oniceconnectionstatechange = e => log(pub_pc.iceConnectionState);
-  pub_pc.onicecandidate = event => {
-    if (event.candidate === null) {
-      document.getElementById("pubLocalSessionDescription").value = pub_pc.localDescription.sdp
+  pub_pc.oniceconnectionstatechange = e => {
+    log(pub_pc.iceConnectionState);
+    if (pub_pc.iceConnectionState == "connected") {
+      pub_pc.getStats().then(s => {
+        s.forEach(o => {
+          // chrome
+          if (o.state == "succeeded") {
+            document.getElementById("run_pub_local_ice").innerHTML = JSON.stringify(s.get(o.localCandidateId));
+            document.getElementById("run_pub_remote_ice").innerHTML = JSON.stringify(s.get(o.remoteCandidateId));
+          }
+          // firefox
+          if (o.selected == true) {
+            document.getElementById("run_pub_local_ice").innerHTML = JSON.stringify(s.get(o.localCandidateId));
+            document.getElementById("run_pub_remote_ice").innerHTML = JSON.stringify(s.get(o.remoteCandidateId));
+          }
+        })
+      })
     }
   }
 
-  navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+  let sendChannel = pub_pc.createDataChannel("control")
+  sendChannel.onclose = () => console.log("sendChannel has closed")
+  sendChannel.onopen = () => console.log("sendChannel has opened")
+  sendChannel.onmessage = e => {
+    log(`Message from DataChannel "${sendChannel.label}" payload "${e.data}"`);
+
+    if (sendChannel.label != "control") {
+        return;
+    }
+
+    // do something
+  }
+
+  let _id = document.getElementById("run_pub_id").value;
+  // use a trailing random id to avoid duplication from same publisher
+  let trailing = "+" + (+new Date).toString(36);
+  let id = _id + trailing;
+  let screen_id = _id + "-screen" + trailing;
+
+  navigator.mediaDevices.getUserMedia({ video: true, audio: { echoCancellation: true } })
     .then(stream => {
       stream.getTracks().forEach(track => pub_pc.addTrack(track, stream))
       document.getElementById("pub_video").srcObject = stream
 
       let room = document.getElementById("run_pub_room").value;
-      let id = document.getElementById("run_pub_id").value;
       let token = document.getElementById("run_pub_token").value;
 
       pub_pc.createOffer()
         .then(offer => {
           pub_pc.setLocalDescription(offer);
+          document.getElementById("pubLocalSessionDescription").value = offer.sdp;
           fetch(`/pub/${room}/${id}`, {
             method: "POST",
             headers: {
@@ -151,6 +195,7 @@ window.runPublisher = () => {
 
   // TODO: don't create new PC
   var pub_screen_pc;
+  var sendChannelScreen;
 
   document.getElementById("run_pub_screenshare").onclick = () => {
 
@@ -161,22 +206,12 @@ window.runPublisher = () => {
       .then(stream => {
 
         pub_screen_pc = new RTCPeerConnection({
-          iceServers: [
-            {
-              urls: "stun:stun.l.google.com:19302"
-            },
-            // also TURN servers here
-            {
-              urls: "turn:turn.qonver.com:3478?transport=udp",
-              username: "qonver_janus_user",
-              credential: "user-janus-qonver-975d1705-e543-4735-a89f-a3518a690f02"
-            }
-          ]
+          iceServers: window.getIceServers(),
         });
 
+        sendChannelScreen = pub_screen_pc.createDataChannel("control");
+
         let room = document.getElementById("run_pub_room").value;
-        let _id = document.getElementById("run_pub_id").value;
-        let id = `${_id}-screen`;
         let token = document.getElementById("run_pub_token").value;
 
         stream.getTracks().forEach(track => pub_screen_pc.addTrack(track, stream));
@@ -185,7 +220,7 @@ window.runPublisher = () => {
         pub_screen_pc.createOffer()
           .then(offer => {
             pub_screen_pc.setLocalDescription(offer);
-            fetch(`/pub/${room}/${id}`, {
+            fetch(`/pub/${room}/${screen_id}`, {
               method: "POST",
               headers: {
                 "Authorization": `Bearer ${token}`,
@@ -205,7 +240,17 @@ window.runPublisher = () => {
       }).catch(log);
   }
 
+  document.getElementById("run_pub_stop").onclick = () => {
+    sendChannel.send("STOP");
+    document.getElementById("run_pub_start").hidden = false;
+    document.getElementById("run_pub_stop").hidden = true;
+    document.getElementById("run_pub_screenshare").hidden = true;
+    document.getElementById("pub_video").srcObject = null;
+    pub_pc.close();
+  }
+
   document.getElementById("run_pub_screenshare_stop").onclick = () => {
+    sendChannelScreen.send("STOP");
     document.getElementById("run_pub_screenshare").hidden = false;
     document.getElementById("run_pub_screenshare_stop").hidden = true;
     document.getElementById("pub_video_screenshare").srcObject = null;
@@ -223,7 +268,10 @@ id: <input id="run_sub_id" type="text"></input><br/>
 token: <input id="run_sub_token" type="text"></input><br/>
 local offer: <br/><textarea id="subLocalSessionDescription" readonly="true"></textarea><br/>
 remote answer: <br/><textarea id="subRemoteSessionDescription" readonly="true"></textarea><br/>
-<button onclick="window.runSubscriber()"> Start Session </button><br />
+selected local candidate: <div id="run_sub_local_ice"></div>
+selected remote candidate: <div id="run_sub_remote_ice"></div>
+<button id="run_sub_start" onclick="window.runSubscriber()"> Start Session </button>
+<button id="run_sub_stop" hidden>Stop Session</button><br/><br/>
 <br/>
 Video<br/>
 <div id="sub_videos"></div><br/><br />
@@ -233,17 +281,15 @@ Logs<br/>
 <div id="sub_log"></div>
 <script>
 window.runSubscriber = () => {
+  document.getElementById("run_sub_start").hidden = true;
+  document.getElementById("run_sub_stop").hidden = false;
+
   let log = msg => {
     document.getElementById("sub_log").innerHTML += msg + "<br>"
   };
 
   let sub_pc = new RTCPeerConnection({
-    iceServers: [
-      {
-        urls: "stun:stun.l.google.com:19302"
-      },
-      // also TURN servers here
-    ]
+    iceServers: window.getIceServers(),
   });
 
   // for easier debug and trial only
@@ -266,10 +312,23 @@ window.runSubscriber = () => {
   // for easier debug and trial only
   window.id_to_track_events = id_to_track_events;
 
-  sub_pc.oniceconnectionstatechange = e => log(sub_pc.iceConnectionState);
-  sub_pc.onicecandidate = event => {
-    if (event.candidate === null) {
-      document.getElementById("subLocalSessionDescription").value = sub_pc.localDescription.sdp
+  sub_pc.oniceconnectionstatechange = e => {
+    log(sub_pc.iceConnectionState);
+    if (sub_pc.iceConnectionState == "connected") {
+      sub_pc.getStats().then(s => {
+        s.forEach(o => {
+          // chrome
+          if (o.state == "succeeded") {
+            document.getElementById("run_sub_local_ice").innerHTML = JSON.stringify(s.get(o.localCandidateId));
+            document.getElementById("run_sub_remote_ice").innerHTML = JSON.stringify(s.get(o.remoteCandidateId));
+          }
+          // firefox
+          if (o.selected == true) {
+            document.getElementById("run_sub_local_ice").innerHTML = JSON.stringify(s.get(o.localCandidateId));
+            document.getElementById("run_sub_remote_ice").innerHTML = JSON.stringify(s.get(o.remoteCandidateId));
+          }
+        })
+      })
     }
   }
 
@@ -429,7 +488,8 @@ window.runSubscriber = () => {
       document.getElementById("subLocalSessionDescription").value = offer.sdp;
 
       let room = document.getElementById("run_sub_room").value;
-      let id = document.getElementById("run_sub_id").value;
+      // use a trailing random id to avoid duplication from same publisher
+      let id = document.getElementById("run_sub_id").value + "+" + (+new Date).toString(36);
       let token = document.getElementById("run_sub_token").value;
 
       fetch(`/sub/${room}/${id}`, {
@@ -448,6 +508,14 @@ window.runSubscriber = () => {
       });
     })
     .catch(log);
+
+  document.getElementById("run_sub_stop").onclick = () => {
+    sendChannel.send("STOP");
+    document.getElementById("run_sub_start").hidden = false;
+    document.getElementById("run_sub_stop").hidden = true;
+    document.getElementById("sub_videos").textContent = '';
+    sub_pc.close();
+  }
 }
 </script>
 

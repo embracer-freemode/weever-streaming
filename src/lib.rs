@@ -36,6 +36,10 @@ fn main() -> Result<()> {
     // 1. filter via RUST_LOG env
     // 2. output to stdout
     // 3. output to logfile
+    //
+    // use "console_subscriber::build()"
+    // instead of "tracing_subscriber::registry()"
+    // for tokio-console
     let subscriber = tracing_subscriber::registry()
         .with(EnvFilter::from_default_env())    // RUST_LOG env filter
         .with(fmt::Layer::new().with_writer(std::io::stdout))

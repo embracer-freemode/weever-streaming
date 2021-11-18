@@ -51,16 +51,6 @@ use std::pin::Pin;
 use std::sync::{Arc, Weak, atomic::{AtomicU8, Ordering}};
 
 
-struct Publisher(Arc<Publisher>);
-struct PublisherWeak(Weak<Publisher>);
-
-impl PublisherWeak {
-    // Try upgrading a weak reference to a strong one
-    fn upgrade(&self) -> Option<Publisher> {
-        self.0.upgrade().map(Publisher)
-    }
-}
-
 /////////////////////////
 // Weak reference helper
 /////////////////////////
@@ -92,17 +82,6 @@ struct PublisherDetails {
 impl std::ops::Drop for PublisherDetails {
     fn drop(&mut self) {
         info!("dropping PublisherDetails for room {} user {}", self.room, self.user);
-    }
-}
-
-// To be able to access the internal fields directly
-// We wrap the real things with reference counting and new type,
-// this will let us use the wrapping type like there is no wrap.
-impl std::ops::Deref for Publisher {
-    type Target = PublisherDetails;
-
-    fn deref(&self) -> &PublisherDetails {
-        &self.0
     }
 }
 
@@ -223,6 +202,8 @@ impl PublisherDetails {
         let user = self.user.clone();
         let room = self.room.clone();
         let track_count = Arc::new(AtomicU8::new(0));
+        let video_count = Arc::new(AtomicU8::new(0));
+        let audio_count = Arc::new(AtomicU8::new(0));
 
         Box::new(move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
             let _enter = span.enter();  // populate user & room info in following logs
@@ -235,6 +216,8 @@ impl PublisherDetails {
                 let room = room.clone();
                 let nc = nc.clone();
                 let track_count = track_count.clone();
+                let video_count = video_count.clone();
+                let audio_count = audio_count.clone();
                 return Box::pin(async move {
                     let tid = track.tid();
                     let kind = track.kind().to_string();
@@ -249,16 +232,26 @@ impl PublisherDetails {
                           msid,         // the msid here generated from browser might be "{xxx} {ooo}"
                     );
 
-                    // TODO: more meaningful app_id? e.g. video0 or camera0
-                    let app_id = msid.strip_prefix(&stream_id).unwrap_or(&msid).trim();
+                    let count = track_count.fetch_add(1, Ordering::SeqCst) + 1;
+                    // app_id will become like "video0", "audio0"
+                    let app_id = match kind.as_str() {
+                        "video" => {
+                            let c = video_count.fetch_add(1, Ordering::SeqCst);
+                            format!("video{}", c)
+                        },
+                        "audio" => {
+                            let c = audio_count.fetch_add(1, Ordering::SeqCst);
+                            format!("audio{}", c)
+                        },
+                        _ => unreachable!(),
+                    };
+
                     catch(SHARED_STATE.add_user_track_to_mime(
                         room.clone(),
                         user.clone(),
                         app_id.to_string(),
                         kind,
                     )).await;
-
-                    let count = track_count.fetch_add(1, Ordering::SeqCst) + 1;
 
                     // if all the tranceivers have active track
                     // let's fire the publisher join notify to all subscribers
@@ -321,10 +314,13 @@ impl PublisherDetails {
         // use ID to disquish streams from same publisher
         tokio::spawn(async move {
             let kind = track.kind().to_string();    // video/audio
+            // e.g. "rtc.1234.pub1.video.video0"
             let subject = format!("rtc.{}.{}.{}.{}", room, user, kind, app_id);
             info!("publish to {}", subject);
             let mut b = vec![0u8; 1500];
-            while let Ok((n, _)) = track.read(&mut b).await {
+            // use a timeout to make sure we will close this loop if we don't get new RTP for a while
+            let max_time = Duration::from_secs(10);
+            while let Ok(Ok((n, _))) = timeout(max_time, track.read(&mut b)).await {
                 nats.publish(&subject, &b[..n]).await?;
             }
             info!("leaving RTP to NATS push: {}", subject);
@@ -355,53 +351,47 @@ impl PublisherDetails {
 
             info!("PeerConnection State has changed: {}", s);
 
-            if s == RTCPeerConnectionState::Failed {
-                // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
-                // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
-                // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-                info!("Peer Connection has gone to failed exiting: Done forwarding");
+            match s {
+                RTCPeerConnectionState::Connected => {
+                    let now = std::time::SystemTime::now();
+                    let duration = match now.duration_since(created) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            error!("system time error: {}", e);
+                            Duration::from_secs(42) // fake one for now
+                        },
+                    }.as_millis();
+                    info!("Peer Connection connected! spent {} ms from created", duration);
 
-                // also do state cleanup here
-                // in case we didn't go through disconnected and become failed directly
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    catch(SHARED_STATE.remove_publisher(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
-            }
+                    let room = room.clone();
+                    let user = user.clone();
+                    return Box::pin(async move {
+                        catch(SHARED_STATE.add_publisher(&room, &user)).await;
+                    }.instrument(tracing::Span::current()));
+                }
+                RTCPeerConnectionState::Failed |
+                RTCPeerConnectionState::Disconnected |
+                RTCPeerConnectionState::Closed => {
+                    // NOTE:
+                    // In disconnected state, PeerConnection may still come back, e.g. reconnect using an ICE Restart.
+                    // But let's cleanup everything for now.
+                    info!("send close notification");
+                    notify_close.notify_waiters();
 
-            if s == RTCPeerConnectionState::Disconnected {
-                // TODO: also remove the media from state
+                    // TODO: also remove the media from state?
 
-                notify_close.notify_waiters();
+                    let room = room.clone();
+                    let user = user.clone();
+                    return Box::pin(async move {
+                        // tell subscribers a new publisher just leave
+                        // ask subscribers to renegotiation
+                        catch(Self::notify_subs_for_leave(&room, &user)).await;
+                        catch(SHARED_STATE.remove_publisher(&room, &user)).await;
+                    }.instrument(tracing::Span::current()));
 
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    // tell subscribers a new publisher just leave
-                    // ask subscribers to renegotiation
-                    catch(Self::notify_subs_for_leave(&room, &user)).await;
-                    catch(SHARED_STATE.remove_publisher(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
-                // TODO: make sure we will cleanup related stuffs
-            }
-
-            if s == RTCPeerConnectionState::Connected {
-                let now = std::time::SystemTime::now();
-                let duration = match now.duration_since(created) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        error!("system time error: {}", e);
-                        Duration::from_secs(42) // fake one for now
-                    },
-                }.as_millis();
-                info!("Peer Connection connected! spent {} ms from created", duration);
-
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    catch(SHARED_STATE.add_publisher(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
+                    // TODO: make sure we will cleanup related stuffs?
+                },
+                _ => {}
             }
 
             Box::pin(async {})
@@ -508,6 +498,11 @@ impl PublisherDetails {
                     // TODO: add condition to check if needed
                     // FIXME: don't hardcode video & app_id
                     catch(SHARED_STATE.send_pub_media_add(&room, &user, "video", "screen")).await;
+                }.instrument(span.clone()));
+            } else if msg_str == "STOP" {
+                info!("actively close peer connection");
+                return Box::pin(async move {
+                    let _ = pc.close().await;
                 }.instrument(span.clone()));
             }
 

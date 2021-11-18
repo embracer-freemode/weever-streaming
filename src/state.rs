@@ -5,7 +5,7 @@
 use crate::helper::catch;
 use anyhow::{Result, Context};
 use async_trait::async_trait;
-use log::info;
+use log::{info, error};
 use tokio::sync::mpsc;
 use once_cell::sync::Lazy;
 use redis::aio::MultiplexedConnection;
@@ -157,7 +157,9 @@ impl SharedState for State {
         // redis version:
         let mut conn = self.get_redis()?;
         let key = format!("token#pub#{}#{}", room, user);
-        let _: Option<()> = conn.set(key, token).await.context("Redis set failed")?;
+        let _: Option<()> = conn.set(key.clone(), token).await.context("Redis set failed")?;
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
@@ -171,7 +173,9 @@ impl SharedState for State {
         // redis version:
         let mut conn = self.get_redis()?;
         let key = format!("token#sub#{}#{}", room, user);
-        let _: Option<()> = conn.set(key, token).await.context("Redis set failed")?;
+        let _: Option<()> = conn.set(key.clone(), token).await.context("Redis set failed")?;
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
@@ -212,7 +216,9 @@ impl SharedState for State {
         let mut conn = self.get_redis()?;
         let redis_key = format!("utm#{}", room);
         let hash_key = format!("{}#{}", user, track);
-        let _: Option<()> = conn.hset(redis_key, hash_key, mime).await.context("Redis hset failed")?;
+        let _: Option<()> = conn.hset(redis_key.clone(), hash_key, mime).await.context("Redis hset failed")?;
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
@@ -265,14 +271,18 @@ impl SharedState for State {
     async fn add_publisher(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#pub_list", room);
-        let _: Option<()> = conn.sadd(redis_key, user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.sadd(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
     async fn remove_publisher(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#pub_list", room);
-        let _: Option<()> = conn.srem(redis_key, user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.srem(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
@@ -293,14 +303,18 @@ impl SharedState for State {
     async fn add_subscriber(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
-        let _: Option<()> = conn.sadd(redis_key, user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.sadd(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
     async fn remove_subscriber(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
-        let _: Option<()> = conn.srem(redis_key, user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.srem(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
@@ -345,7 +359,10 @@ impl SharedState for State {
         };
         for sub in subs {
             // TODO: special enum for all the cases
-            sub.send(format!("PUB_JOIN {}", pub_user)).await.context("send PUB_JOIN to mpsc Sender failed")?;
+            let result = sub.send(format!("PUB_JOIN {}", pub_user)).await.context("send PUB_JOIN to mpsc Sender failed");
+            if let Err(err) = result {
+                error!("{:?}", err);
+            }
         }
         Ok(())
     }
@@ -369,7 +386,10 @@ impl SharedState for State {
         };
         for sub in subs {
             // TODO: special enum for all the cases
-            sub.send(format!("PUB_LEFT {}", pub_user)).await.context("send PUB_LEFT to mpsc Sender failed")?;
+            let result = sub.send(format!("PUB_LEFT {}", pub_user)).await.context("send PUB_LEFT to mpsc Sender failed");
+            if let Err(err) = result {
+                error!("{:?}", err);
+            }
         }
         Ok(())
     }
@@ -393,7 +413,10 @@ impl SharedState for State {
         };
         for sub in subs {
             // TODO: special enum for all the cases
-            sub.send("RENEGOTIATION".to_string()).await.context("send RENEGOTIATION to mpsc Sender failed")?;
+            let result = sub.send("RENEGOTIATION".to_string()).await.context("send RENEGOTIATION to mpsc Sender failed");
+            if let Err(err) = result {
+                error!("{:?}", err);
+            }
         }
         Ok(())
     }
@@ -417,7 +440,10 @@ impl SharedState for State {
         };
         for sub in subs {
             // TODO: special enum for all the cases
-            sub.send(msg.to_string()).await.context("send PUB_MEDIA_ADD to mpsc Sender failed")?;
+            let result = sub.send(msg.to_string()).await.context("send PUB_MEDIA_ADD to mpsc Sender failed");
+            if let Err(err) = result {
+                error!("{:?}", err);
+            }
         }
         Ok(())
     }

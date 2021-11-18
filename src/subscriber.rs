@@ -46,6 +46,7 @@ use webrtc::{
 use tokio::time::{Duration, timeout};
 use tokio::sync::oneshot;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tracing::Instrument;
 use std::sync::{Arc, RwLock};
 use std::collections::HashMap;
@@ -83,6 +84,7 @@ struct SubscriberDetails {
     notify_sender: Option<mpsc::Sender<String>>,
     notify_receiver: Option<mpsc::Receiver<String>>,
     created: std::time::SystemTime,
+    tokio_tasks: Arc<RwLock<Vec<JoinHandle<()>>>>,
 }
 
 // for logging only
@@ -208,12 +210,32 @@ impl SubscriberDetails {
         // TODO: dynamic creation
         // TODO: how to handle video/audio from same publisher and send to different track?
         // HACK_MEDIA.lock().unwrap().push("video".to_string());
+        //
+        // TODO: share with PUB_JOIN handler
+
+        let mut video_count = 0;
+        let mut audio_count = 0;
 
         let media = SHARED_STATE.get_user_track_to_mime(&self.room).await.context("get user track to mime failed")?;
         for ((user, track_id), mime) in media {
+            // skip it if publisher is the same as subscriber
+            // so we won't pull back our own media streams and cause echo effect
+            // TODO: remove the hardcode "-screen" case
+            if user == self.user || user == format!("{}-screen", self.user) {
+                continue;
+            }
+
             let app_id = match mime.as_ref() {
-                "video" => "video0",
-                "audio" => "audio0",
+                "video" => {
+                    let result = format!("video{}", video_count);
+                    video_count += 1;
+                    result
+                },
+                "audio" => {
+                    let result = format!("audio{}", audio_count);
+                    audio_count += 1;
+                    result
+                },
                 _ => unreachable!(),
             };
 
@@ -236,6 +258,8 @@ impl SubscriberDetails {
                 // This must be unique.
                 user.to_string(),           // msid, group id part
             ));
+
+            info!("track map ({}, {}) -> {}", user, track_id, app_id);
 
             // for later dyanmic RTP dispatch from NATS
             self.tracks.write().unwrap().insert((user.clone(), track_id.clone()), track.clone());
@@ -262,13 +286,12 @@ impl SubscriberDetails {
     /// Before these packets are returned they are processed by interceptors.
     /// For things like NACK this needs to be called.
     fn spawn_rtcp_reader(&self, rtp_sender: Arc<RTCRtpSender>) {
-        tokio::spawn(async move {
+        self.tokio_tasks.write().unwrap().push(tokio::spawn(async move {
             let mut rtcp_buf = vec![0u8; 1500];
             info!("running RTP sender read");
             while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
             info!("leaving RTP sender read");
-            Result::<()>::Ok(())
-        }.instrument(tracing::Span::current()));
+        }.instrument(tracing::Span::current())));
     }
 
     fn register_notify_message(&mut self) {
@@ -299,48 +322,40 @@ impl SubscriberDetails {
         Box::new(move |s: RTCPeerConnectionState| {
             let _enter = span.enter();  // populate user & room info in following logs
             info!("PeerConnection State has changed: {}", s);
-            if s == RTCPeerConnectionState::Failed {
-                // Wait until PeerConnection has had no network activity for 30 seconds or another failure. It may be reconnected using an ICE Restart.
-                // Use webrtc.PeerConnectionStateDisconnected if you are interested in detecting faster timeout.
-                // Note that the PeerConnection may come back from PeerConnectionStateDisconnected.
-                info!("Peer Connection has gone to failed exiting: Done forwarding");
+            match s {
+                RTCPeerConnectionState::Connected => {
+                    let now = std::time::SystemTime::now();
+                    let duration = match now.duration_since(created) {
+                        Ok(d) => d,
+                        Err(e) => {
+                            error!("system time error: {}", e);
+                            Duration::from_secs(42) // fake one for now
+                        },
+                    }.as_millis();
 
-                // also do state cleanup here
-                // in case we didn't go through disconnected and become failed directly
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    catch(SHARED_STATE.remove_subscriber(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
-            }
+                    info!("Peer Connection connected! spent {} ms from created", duration);
 
-            if s == RTCPeerConnectionState::Disconnected {
-                notify_close.notify_waiters();
+                    let room = room.clone();
+                    let user = user.clone();
+                    return Box::pin(async move {
+                        catch(SHARED_STATE.add_subscriber(&room, &user)).await;
+                    }.instrument(tracing::Span::current()));
+                },
+                RTCPeerConnectionState::Failed |
+                RTCPeerConnectionState::Disconnected |
+                RTCPeerConnectionState::Closed => {
+                    // NOTE:
+                    // In disconnected state, PeerConnection may still come back, e.g. reconnect using an ICE Restart.
+                    // But let's cleanup everything for now.
+                    notify_close.notify_waiters();
 
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    catch(SHARED_STATE.remove_subscriber(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
-            }
-
-            if s == RTCPeerConnectionState::Connected {
-                let now = std::time::SystemTime::now();
-                let duration = match now.duration_since(created) {
-                    Ok(d) => d,
-                    Err(e) => {
-                        error!("system time error: {}", e);
-                        Duration::from_secs(42) // fake one for now
-                    },
-                }.as_millis();
-
-                info!("Peer Connection connected! spent {} ms from created", duration);
-
-                let room = room.clone();
-                let user = user.clone();
-                return Box::pin(async move {
-                    catch(SHARED_STATE.add_subscriber(&room, &user)).await;
-                }.instrument(tracing::Span::current()));
+                    let room = room.clone();
+                    let user = user.clone();
+                    return Box::pin(async move {
+                        catch(SHARED_STATE.remove_subscriber(&room, &user)).await;
+                    }.instrument(tracing::Span::current()));
+                },
+                _ => {}
             }
 
             Box::pin(async {})
@@ -365,6 +380,7 @@ impl SubscriberDetails {
         let user_media_to_senders = self.user_media_to_senders.clone();
         let notify_sender = self.notify_sender.as_ref().unwrap().clone();
         let room = self.room.clone();
+        let user = self.user.clone();
 
         Box::new(move |dc: Arc<RTCDataChannel>| {
             let _enter = span.enter();  // populate user & room info in following logs
@@ -380,6 +396,7 @@ impl SubscriberDetails {
             // channel open handling
             Self::on_data_channel_open(
                 room.clone(),
+                user.clone(),
                 wpc.clone(),
                 dc,
                 dc_label,
@@ -395,6 +412,7 @@ impl SubscriberDetails {
 
     fn on_data_channel_open(
             room: String,
+            user: String,
             wpc: WeakPeerConnection,
             dc: Arc<RTCDataChannel>,
             dc_label: String,
@@ -410,6 +428,7 @@ impl SubscriberDetails {
         Box::pin(async move {
             dc.on_open(Self::on_data_channel_sender(
                     room,
+                    user,
                     wpc.clone(),
                     dc.clone(),
                     dc_label.clone(),
@@ -432,6 +451,7 @@ impl SubscriberDetails {
     }
 
     fn on_data_channel_sender(room: String,
+                              user: String,
                               wpc: WeakPeerConnection,
                               dc: Arc<RTCDataChannel>,
                               dc_label: String,
@@ -495,6 +515,7 @@ impl SubscriberDetails {
                             Self::on_pub_join(
                                 room.clone(),
                                 join_user.to_string(),
+                                user.clone(),
                                 pc.clone(),
                                 media.clone(),
                                 tracks.clone(),
@@ -580,14 +601,17 @@ impl SubscriberDetails {
                         dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await.unwrap();
                     }
                 }.instrument(span.clone()));
-            }
-
-            // FIXME: remove this?
-            if msg_str.starts_with("RENEGOTIATION") {
+            } else if msg_str.starts_with("RENEGOTIATION") {
+                // FIXME: remove this?
                 let notify_sender = notify_sender.clone();
                 return Box::pin(async move {
                     notify_sender.send("RENEGOTIATION".to_string()).await.unwrap();
                 });
+            } else if msg_str == "STOP" {
+                info!("actively close peer connection");
+                return Box::pin(async move {
+                    let _ = pc.close().await;
+                }.instrument(span.clone()));
             }
 
             Box::pin(async {})
@@ -597,6 +621,7 @@ impl SubscriberDetails {
     async fn on_pub_join(
             _room: String,
             join_user: String,
+            sub_user: String,
             pc: Arc<RTCPeerConnection>,
             media: HashMap<(String, String), String>,
             tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
@@ -606,8 +631,25 @@ impl SubscriberDetails {
 
         info!("pub join: {}", join_user);
 
+        // skip it if publisher is the same as subscriber
+        // so we won't pull back our own media streams and cause echo effect
+        // TODO: remove the hardcode "-screen" case
+        if join_user == sub_user || join_user == format!("{}-screen", sub_user){
+            return;
+        }
+
+        let mut video_count = 0;
+        let mut audio_count = 0;
+
         // add new track for PUB_JOIN
+        // TODO: use better mechanism replace "(user, track) -> mime"
         for ((pub_user, track_id), mime) in media {
+            // skip it if publisher is the same as subscriber
+            // so we won't pull back our own media streams and cause echo effect
+            if pub_user == sub_user || pub_user == format!("{}-screen", sub_user) {
+                continue;
+            }
+
             if tracks.read().unwrap().contains_key(&(pub_user.clone(), track_id.clone())) {
                 continue;
             }
@@ -615,8 +657,16 @@ impl SubscriberDetails {
             // hardcode this for now
             // we may need to change it to support like screen sharing later
             let app_id = match mime.as_ref() {
-                "video" => "video0",
-                "audio" => "audio0",
+                "video" => {
+                    let result = format!("video{}", video_count);
+                    video_count += 1;
+                    result
+                },
+                "audio" => {
+                    let result = format!("audio{}", audio_count);
+                    audio_count += 1;
+                    result
+                },
                 _ => unreachable!(),
             };
 
@@ -626,7 +676,6 @@ impl SubscriberDetails {
                 _ => unreachable!(),
             };
 
-            // info!("{} add new track for {} {}", user, pub_user, track_id);   // TODO: or use tracing's span
             info!("add new track for {} {}", pub_user, track_id);
 
             let track = Arc::new(TrackLocalStaticRTP::new(
@@ -843,28 +892,26 @@ impl SubscriberDetails {
         let subject = self.get_nats_subect();
         let sub = self.nats.subscribe(&subject).await?;
         let tracks = self.tracks.clone();
-        let sub_user = self.user.clone();
 
         // Read RTP packets forever and send them to the WebRTC Client
-        tokio::spawn(async move {
+        self.tokio_tasks.write().unwrap().push(tokio::spawn(async move {
             use webrtc::Error;
             while let Some(msg) = sub.next().await {
                 let raw_rtp = msg.data;
 
+                // TODO: leave the loop when subscriber leaves
+
                 // TODO: real dyanmic dispatch for RTP
-                // subject sample: "rtc.1234.user1.v.video1" "rtc.1234.user1.a.audio1"
+                // subject sample: "rtc.1234.user1.video.video1" "rtc.1234.user1.audio.audio1"
                 let mut it = msg.subject.rsplitn(4, ".").take(3);
                 let track_id = it.next().unwrap().to_string();
                 let user = it.skip(1).next().unwrap().to_string();
-                // TODO: don't push the RTP to subscriber is the publisher has same id
-                if user == sub_user {
-                    continue;
-                }
                 let track = {
                     let tracks = tracks.read().unwrap();
                     let track = tracks.get(&(user, track_id));
-                    // FIXME: we should always prepare all the tracks for sending RTP
-                    // TODO: create new tracks in renegotiation case
+                    // if we don't have corresponding track
+                    // either we are not ready for this
+                    // or the RTP is from ourself (publisher == subscriber)
                     if track.is_none() {
                         continue;
                     }
@@ -884,7 +931,7 @@ impl SubscriberDetails {
                 }
             }
             info!("leaving NATS to RTP pull: {}", subject);
-        });
+        }));
 
         Ok(())
     }
@@ -926,6 +973,7 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         notify_sender: None,
         notify_receiver: None,
         created: std::time::SystemTime::now(),
+        tokio_tasks: Default::default(),
     };
 
     subscriber.add_trasceivers_based_on_room().await?;
@@ -985,6 +1033,10 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
     let max_time = Duration::from_secs(3 * 60 * 60);
     timeout(max_time, subscriber.notify_close.notified()).await?;
     peer_connection.close().await?;
+    // remove all spawned tasks
+    for task in subscriber.tokio_tasks.read().unwrap().iter() {
+        task.abort();
+    }
     info!("leaving subscriber main");
 
     Ok(())
