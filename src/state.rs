@@ -1,9 +1,12 @@
 //! Sharing state for whole program.
-//! Currently, we share states across instances via Redis.
+//!
+//! The publisher metadata will share across instances (via Redis).
+//! The subscribe metadata will be per instance local only.
+//!
 //! We can implement multiple state mechanism as long as it fit the SharedState trait.
 
 use crate::helper::catch;
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, anyhow};
 use async_trait::async_trait;
 use log::{info, error};
 use tokio::sync::mpsc;
@@ -61,7 +64,7 @@ struct Room {
 #[derive(Debug, Default)]
 struct PeerConnetionInfo {
     name: String,
-    notify_message: Option<Arc<mpsc::Sender<Command>>>,  // TODO: special enum for all the cases
+    notify_message: Option<Arc<mpsc::Sender<Command>>>,
 }
 
 pub type State = Lazy<RwLock<InternalState>>;
@@ -75,11 +78,11 @@ pub static SHARED_STATE: State = Lazy::new(|| Default::default());
 #[async_trait]
 pub trait SharedState {
     /// Set Redis connection
-    fn set_redis(&self, conn: MultiplexedConnection);
+    fn set_redis(&self, conn: MultiplexedConnection) -> Result<()>;
     /// Get Redis connection
     fn get_redis(&self) -> Result<MultiplexedConnection>;
     /// Set NATS connection
-    fn set_nats(&self, nats: nats::asynk::Connection);
+    fn set_nats(&self, nats: nats::asynk::Connection) -> Result<()>;
     /// Get NATS connection
     fn get_nats(&self) -> Result<nats::asynk::Connection>;
 
@@ -115,9 +118,9 @@ pub trait SharedState {
     async fn exist_subscriber(&self, room: &str, user: &str) -> Result<bool>;
 
     /// Set Sender (for other people to talk to specific subscriber)
-    fn add_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<Command>);
+    fn add_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<Command>) -> Result<()>;
     /// Remove Sender (for other people to talk to specific subscriber)
-    fn remove_sub_notify(&self, room: &str, user: &str);
+    fn remove_sub_notify(&self, room: &str, user: &str) -> Result<()>;
 
     /// send cross instances commands, e.g. via NATS
     async fn send_command(&self, room: &str, cmd: Command) -> Result<()>;
@@ -132,23 +135,25 @@ pub trait SharedState {
 /// implement cross instances communication for NATS & Redis
 #[async_trait]
 impl SharedState for State {
-    fn set_redis(&self, conn: MultiplexedConnection) {
-        let mut state = self.write().unwrap();
+    fn set_redis(&self, conn: MultiplexedConnection) -> Result<()> {
+        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         state.redis = Some(conn);
+        Ok(())
     }
 
     fn get_redis(&self) -> Result<MultiplexedConnection> {
-        let state = self.read().unwrap();
+        let state = self.read().map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
         Ok(state.redis.as_ref().context("get Redis client failed")?.clone())
     }
 
-    fn set_nats(&self, nats: nats::asynk::Connection) {
-        let mut state = self.write().unwrap();
+    fn set_nats(&self, nats: nats::asynk::Connection) -> Result<()> {
+        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         state.nats = Some(nats);
+        Ok(())
     }
 
     fn get_nats(&self) -> Result<nats::asynk::Connection> {
-        let state = self.read().unwrap();
+        let state = self.read().map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
         Ok(state.nats.as_ref().context("get NATS client failed")?.clone())
     }
 
@@ -216,9 +221,9 @@ impl SharedState for State {
         let mut result = HashMap::new();
         for (k, v) in utm.into_iter() {
             let mut it = k.splitn(2, "#");
-            let user = it.next().unwrap();
-            let track = it.next().unwrap();
-            result.insert((user.to_string(), track.to_string()), v.to_string());
+            if let Some((user, track)) = it.next().zip(it.next()) {
+                result.insert((user.to_string(), track.to_string()), v.to_string());
+            }
         }
         Ok(result)
     }
@@ -315,18 +320,18 @@ impl SharedState for State {
         Ok(result)
     }
 
-    fn add_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<Command>) {
+    fn add_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<Command>) -> Result<()> {
         // TODO: convert this write lock to read lock, use field interior mutability
-        let mut state = self.write().unwrap();
+        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room = state.rooms.entry(room.to_string()).or_default();
         let user = room.sub_peers.entry(user.to_string()).or_default();
         user.notify_message = Some(Arc::new(sender.clone()));
+        Ok(())
     }
 
-    fn remove_sub_notify(&self, room: &str, user: &str) {
+    fn remove_sub_notify(&self, room: &str, user: &str) -> Result<()> {
         // TODO: convert this write lock to read lock, use field interior mutability
-        // TODO: room cleanup from hashmap?
-        let mut state = self.write().unwrap();
+        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room_obj = state.rooms.entry(room.to_string()).or_default();
         let _ = room_obj.sub_peers.remove(user);
         // if there is no subscribers for this room
@@ -334,9 +339,9 @@ impl SharedState for State {
         if room_obj.sub_peers.is_empty() {
             let _ = state.rooms.remove(room);
         }
+        Ok(())
     }
 
-    // TODO: remove all send_pub_* methods
     async fn send_command(&self, room: &str, cmd: Command) -> Result<()> {
         let subject = format!("cmd.{}", room);
         let mut slice = [0u8; 64];
@@ -367,10 +372,11 @@ impl SharedState for State {
         // cmd.ROOM
         // e.g. cmd.1234
         let subject = "cmd.*";
-        let sub = nats.subscribe(subject).await?;
+        let sub = nats.subscribe(subject).await.context("NATS subscribe for commands failed")?;
 
         async fn process(msg: nats::asynk::Message) -> Result<()> {
-            let room = msg.subject.splitn(2, ".").skip(1).next().unwrap();
+            let room = msg.subject.splitn(2, ".").skip(1).next()
+                .context("extract room from NATS subject failed")?;
             SHARED_STATE.on_command(room, &msg.data).await?;
             Ok(())
         }
@@ -387,15 +393,17 @@ impl SharedState for State {
 
     async fn forward_to_all_subs(&self, room: &str, cmd: Command) -> Result<()> {
         let subs = {
-            let state = self.read().unwrap();
+            let state = self.read().map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
             let room = match state.rooms.get(room) {
                 Some(room) => room,
                 None => return Ok(()),
             };
-            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
+            room.sub_peers
+                .iter()
+                .filter_map(|(_, sub)| sub.notify_message.clone())
+                .collect::<Vec<_>>()
         };
         for sub in subs {
-            // TODO: special enum for all the cases
             let result = sub.send(cmd.clone()).await.with_context(|| format!("send {:?} to mpsc Sender failed", cmd));
             if let Err(err) = result {
                 error!("{:?}", err);

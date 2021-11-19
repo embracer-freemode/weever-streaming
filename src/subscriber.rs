@@ -491,14 +491,17 @@ impl SubscriberDetails {
                     let msg = timeout(max_time, notify_message.recv()).await;
                     if let Ok(msg) = msg {
                         // we get data before timeout
-                        let media = SHARED_STATE.get_user_track_to_mime(&room).await.unwrap();
+                        let cmd = match msg {
+                            Some(cmd) => cmd,
+                            _ => break,     // e.g. alread closed
+                        };
 
-                        let cmd = msg.unwrap();
                         info!("cmd from internal sender: {:?}", cmd);
                         let msg = cmd.to_user_msg();
 
                         match cmd {
                             Command::PubJoin(join_user) => {
+                                let media = SHARED_STATE.get_user_track_to_mime(&room).await.unwrap();
                                 Self::on_pub_join(
                                     room.clone(),
                                     join_user.to_string(),
