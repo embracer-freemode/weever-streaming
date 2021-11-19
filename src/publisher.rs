@@ -246,11 +246,10 @@ impl PublisherDetails {
                         _ => unreachable!(),
                     };
 
-                    catch(SHARED_STATE.add_user_track_to_mime(
-                        room.clone(),
-                        user.clone(),
-                        app_id.to_string(),
-                        kind,
+                    catch(SHARED_STATE.add_user_media_count(
+                        &room,
+                        &user,
+                        &kind,
                     )).await;
 
                     // if all the tranceivers have active track
@@ -508,7 +507,7 @@ impl PublisherDetails {
         info!("notify subscribers for publisher leave");
         // remove from global state
         // TODO: better mechanism
-        catch(SHARED_STATE.remove_user_track_to_mime(&room, &user)).await;
+        catch(SHARED_STATE.remove_user_media_count(&room, &user)).await;
         catch(SHARED_STATE.send_command(room, Command::PubLeft(user.to_string()))).await;
         Ok(())
     }

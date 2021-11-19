@@ -218,8 +218,9 @@ impl SubscriberDetails {
         let mut video_count = 0;
         let mut audio_count = 0;
 
-        let media = SHARED_STATE.get_user_track_to_mime(&self.room).await.context("get user track to mime failed")?;
-        for ((user, track_id), mime) in media {
+        let media = SHARED_STATE.get_users_media_count(&self.room).await.context("get user media count failed")?;
+
+        for ((user, mime), count) in media {
             // skip it if publisher is the same as subscriber
             // so we won't pull back our own media streams and cause echo effect
             // TODO: remove the hardcode "-screen" case
@@ -227,59 +228,66 @@ impl SubscriberDetails {
                 continue;
             }
 
-            let app_id = match mime.as_ref() {
-                "video" => {
-                    let result = format!("video{}", video_count);
-                    video_count += 1;
-                    result
-                },
-                "audio" => {
-                    let result = format!("audio{}", audio_count);
-                    audio_count += 1;
-                    result
-                },
-                _ => unreachable!(),
-            };
+            for index in 0..count {
+                // FIXME: refactor related stuffs
+                let track_id = format!("{}{}", mime, index);
 
-            let mime = match mime.as_ref() {
-                "video" => MIME_TYPE_VP8,
-                "audio" => MIME_TYPE_OPUS,
-                _ => unreachable!(),
-            };
+                let app_id = match mime.as_ref() {
+                    "video" => {
+                        let result = format!("video{}", video_count);
+                        video_count += 1;
+                        result
+                    },
+                    "audio" => {
+                        let result = format!("audio{}", audio_count);
+                        audio_count += 1;
+                        result
+                    },
+                    _ => unreachable!(),
+                };
 
-            let track = Arc::new(TrackLocalStaticRTP::new(
-                RTCRtpCodecCapability {
-                    mime_type: mime.to_owned(),
-                    ..Default::default()
-                },
-                // id is the unique identifier for this Track.
-                // This should be unique for the stream, but doesn’t have to globally unique.
-                // A common example would be 'audio' or 'video' or 'desktop' or 'webcam'
-                app_id.to_string(),         // msid, application id part
-                // stream_id is the group this track belongs too.
-                // This must be unique.
-                user.to_string(),           // msid, group id part
-            ));
+                let mime = match mime.as_ref() {
+                    "video" => MIME_TYPE_VP8,
+                    "audio" => MIME_TYPE_OPUS,
+                    _ => unreachable!(),
+                };
 
-            info!("track map ({}, {}) -> {}", user, track_id, app_id);
+                let track = Arc::new(TrackLocalStaticRTP::new(
+                    RTCRtpCodecCapability {
+                        mime_type: mime.to_owned(),
+                        ..Default::default()
+                    },
+                    // id is the unique identifier for this Track.
+                    // This should be unique for the stream, but doesn’t have to globally unique.
+                    // A common example would be 'audio' or 'video' or 'desktop' or 'webcam'
+                    app_id.to_string(),         // msid, application id part
+                    // stream_id is the group this track belongs too.
+                    // This must be unique.
+                    user.to_string(),           // msid, group id part
+                ));
 
-            // for later dyanmic RTP dispatch from NATS
-            self.tracks.write().unwrap().insert((user.clone(), track_id.clone()), track.clone());
-            self.user_media_to_tracks.write().unwrap().insert((user.clone(), app_id.to_string()), track.clone());
+                info!("track map, user {} mime {} index {} -> {}", user, mime, index, app_id);
 
-            let rtp_sender = self.pc
-                .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
-                .await?;
+                // for later dyanmic RTP dispatch from NATS
+                self.tracks.write().unwrap().insert((user.clone(), track_id.clone()), track.clone());
+                self.user_media_to_tracks.write().unwrap().entry((user.to_string(), app_id.to_string()))
+                    .and_modify(|e| *e = track.clone())
+                    .or_insert(track.clone());
 
-            // for later cleanup
-            self.rtp_senders.write().unwrap().insert((user.clone(), track_id.clone()), rtp_sender.clone());
-            self.user_media_to_senders.write().unwrap().insert((user.clone(), app_id.to_string()), rtp_sender.clone());
+                let rtp_sender = self.pc
+                    .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
+                    .await?;
 
-            // Read incoming RTCP packets
-            // Before these packets are returned they are processed by interceptors. For things
-            // like NACK this needs to be called.
-            // NOTE: disable RTCP reader for now
-            // self.spawn_rtcp_reader(rtp_sender);
+                // for later cleanup
+                self.rtp_senders.write().unwrap().insert((user.clone(), track_id.clone()), rtp_sender.clone());
+                self.user_media_to_senders.write().unwrap().insert((user.clone(), app_id.to_string()), rtp_sender.clone());
+
+                // Read incoming RTCP packets
+                // Before these packets are returned they are processed by interceptors. For things
+                // like NACK this needs to be called.
+                // NOTE: disable RTCP reader for now
+                // self.spawn_rtcp_reader(rtp_sender);
+            }
         }
 
         Ok(())
@@ -501,7 +509,7 @@ impl SubscriberDetails {
 
                         match cmd {
                             Command::PubJoin(join_user) => {
-                                let media = SHARED_STATE.get_user_track_to_mime(&room).await.unwrap();
+                                let media = SHARED_STATE.get_users_media_count(&room).await.unwrap();
                                 Self::on_pub_join(
                                     room.clone(),
                                     join_user.to_string(),
@@ -597,7 +605,7 @@ impl SubscriberDetails {
             join_user: String,
             sub_user: String,
             pc: Arc<RTCPeerConnection>,
-            media: HashMap<(String, String), String>,
+            media: HashMap<(String, String), u8>,
             tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
             rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
             user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
@@ -617,101 +625,106 @@ impl SubscriberDetails {
 
         // add new track for PUB_JOIN
         // TODO: use better mechanism replace "(user, track) -> mime"
-        for ((pub_user, track_id), mime) in media {
+        for ((pub_user, mime), count) in media {
             // skip it if publisher is the same as subscriber
             // so we won't pull back our own media streams and cause echo effect
             if pub_user == sub_user || pub_user == format!("{}-screen", sub_user) {
                 continue;
             }
 
-            if tracks.read().unwrap().contains_key(&(pub_user.clone(), track_id.clone())) {
-                continue;
-            }
+            for index in 0..count {
+                // FIXME: refactor related stuffs
+                let track_id = format!("{}{}", mime, index);
 
-            // hardcode this for now
-            // we may need to change it to support like screen sharing later
-            let app_id = match mime.as_ref() {
-                "video" => {
-                    let result = format!("video{}", video_count);
-                    video_count += 1;
-                    result
-                },
-                "audio" => {
-                    let result = format!("audio{}", audio_count);
-                    audio_count += 1;
-                    result
-                },
-                _ => unreachable!(),
-            };
+                if tracks.read().unwrap().contains_key(&(pub_user.clone(), track_id.clone())) {
+                    continue;
+                }
 
-            let mime = match mime.as_ref() {
-                "video" => MIME_TYPE_VP8,
-                "audio" => MIME_TYPE_OPUS,
-                _ => unreachable!(),
-            };
+                // hardcode this for now
+                // we may need to change it to support like screen sharing later
+                let app_id = match mime.as_ref() {
+                    "video" => {
+                        let result = format!("video{}", video_count);
+                        video_count += 1;
+                        result
+                    },
+                    "audio" => {
+                        let result = format!("audio{}", audio_count);
+                        audio_count += 1;
+                        result
+                    },
+                    _ => unreachable!(),
+                };
 
-            info!("add new track for {} {}", pub_user, track_id);
+                let mime = match mime.as_ref() {
+                    "video" => MIME_TYPE_VP8,
+                    "audio" => MIME_TYPE_OPUS,
+                    _ => unreachable!(),
+                };
 
-            let track = Arc::new(TrackLocalStaticRTP::new(
-                RTCRtpCodecCapability {
-                    mime_type: mime.to_owned(),
-                    ..Default::default()
-                },
-                // id is the unique identifier for this Track.
-                // This should be unique for the stream, but doesn’t have to globally unique.
-                // A common example would be 'audio' or 'video' or 'desktop' or 'webcam'
-                app_id.to_string(),     // msid, application id part
-                // stream_id is the group this track belongs too.
-                // This must be unique.
-                pub_user.to_string(),   // msid, group id part
-            ));
+                info!("add new track for {} {}", pub_user, track_id);
 
-            // for later dyanmic RTP dispatch from NATS
-            tracks.write().unwrap().insert((pub_user.to_string(), track_id.to_string()), track.clone());
+                let track = Arc::new(TrackLocalStaticRTP::new(
+                    RTCRtpCodecCapability {
+                        mime_type: mime.to_owned(),
+                        ..Default::default()
+                    },
+                    // id is the unique identifier for this Track.
+                    // This should be unique for the stream, but doesn’t have to globally unique.
+                    // A common example would be 'audio' or 'video' or 'desktop' or 'webcam'
+                    app_id.to_string(),     // msid, application id part
+                    // stream_id is the group this track belongs too.
+                    // This must be unique.
+                    pub_user.to_string(),   // msid, group id part
+                ));
 
-            // TODO: cleanup old track
-            user_media_to_tracks.write().unwrap().entry((pub_user.to_string(), app_id.to_string()))
-                .and_modify(|e| *e = track.clone())
-                .or_insert(track.clone());
+                // for later dyanmic RTP dispatch from NATS
+                tracks.write().unwrap().insert((pub_user.to_string(), track_id.to_string()), track.clone());
 
-            let sender = {
-                let user_media_to_senders = user_media_to_senders.read().unwrap();
-                user_media_to_senders.get(&(pub_user.to_string(), app_id.to_string())).cloned().clone()
-            };
+                // TODO: cleanup old track
+                user_media_to_tracks.write().unwrap().entry((pub_user.to_string(), app_id.to_string()))
+                    .and_modify(|e| *e = track.clone())
+                    .or_insert(track.clone());
 
-            if let Some(sender) = sender {
-                // reuse RtcRTPSender
-                // apply new track
-                info!("switch track for {} {}", pub_user, track_id);
-                sender.replace_track(Some(track.clone())).await.unwrap();
-                info!("switch track for {} {} done", pub_user, track_id);
-            } else {
-                // add tracck to pc
-                // insert rtp sender to cache
-                let pc = Arc::clone(&pc);
-                let pub_user = pub_user.clone();
-                let track_id = track_id.clone();
-                let track = track.clone();
-                let rtp_senders = rtp_senders.clone();
-                let user_media_to_senders = user_media_to_senders.clone();
+                let sender = {
+                    let user_media_to_senders = user_media_to_senders.read().unwrap();
+                    user_media_to_senders.get(&(pub_user.to_string(), app_id.to_string())).cloned().clone()
+                };
 
-                // NOTE: make sure the track is added before leaving this function
-                let rtp_sender = pc
-                    .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
-                    .await.unwrap();
+                if let Some(sender) = sender {
+                    // reuse RtcRTPSender
+                    // apply new track
+                    info!("switch track for {} {}", pub_user, track_id);
+                    sender.replace_track(Some(track.clone())).await.unwrap();
+                    info!("switch track for {} {} done", pub_user, track_id);
+                } else {
+                    // add tracck to pc
+                    // insert rtp sender to cache
+                    let pc = Arc::clone(&pc);
+                    let pub_user = pub_user.clone();
+                    let track_id = track_id.clone();
+                    let track = track.clone();
+                    let rtp_senders = rtp_senders.clone();
+                    let user_media_to_senders = user_media_to_senders.clone();
 
-                // Read incoming RTCP packets
-                // Before these packets are returned they are processed by interceptors. For things
-                // like NACK this needs to be called.
-                tokio::spawn(async move {
-                    info!("create new rtp sender for {} {}", pub_user, track_id);
-                    rtp_senders.write().unwrap().insert((pub_user.clone(), track_id.clone()), rtp_sender.clone());
-                    user_media_to_senders.write().unwrap().insert((pub_user.clone(), app_id.to_string()), rtp_sender.clone());
-                    let mut rtcp_buf = vec![0u8; 1500];
-                    while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
-                    info!("leaving RTP sender read");
-                    Result::<()>::Ok(())
-                }.instrument(tracing::Span::current()));
+                    // NOTE: make sure the track is added before leaving this function
+                    let rtp_sender = pc
+                        .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
+                        .await.unwrap();
+
+                    // Read incoming RTCP packets
+                    // Before these packets are returned they are processed by interceptors. For things
+                    // like NACK this needs to be called.
+                    tokio::spawn(async move {
+                        info!("create new rtp sender for {} {}", pub_user, track_id);
+                        rtp_senders.write().unwrap().insert((pub_user.clone(), track_id.clone()), rtp_sender.clone());
+                        user_media_to_senders.write().unwrap().insert((pub_user.clone(), app_id.to_string()), rtp_sender.clone());
+                        let mut rtcp_buf = vec![0u8; 1500];
+                        while let Ok((_, _)) = rtp_sender.read(&mut rtcp_buf).await {}
+                        info!("leaving RTP sender read");
+                        Result::<()>::Ok(())
+                    }.instrument(tracing::Span::current()));
+                }
             }
         }
     }

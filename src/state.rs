@@ -89,9 +89,9 @@ pub trait SharedState {
     /// Get subscriber authorization token
     async fn get_sub_token(&self, room: &str, user: &str) -> Result<String>;
 
-    async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) -> Result<()>;
-    async fn get_user_track_to_mime(&self, room: &str) -> Result<HashMap<(String, String), String>>;
-    async fn remove_user_track_to_mime(&self, room: &str, user: &str) -> Result<()>;
+    async fn add_user_media_count(&self, room: &str, user: &str, mime: &str) -> Result<()>;
+    async fn get_users_media_count(&self, room: &str) -> Result<HashMap<(String, String), u8>>;
+    async fn remove_user_media_count(&self, room: &str, user: &str) -> Result<()>;
 
     /// Add publisher to room publishers list
     async fn add_publisher(&self, room: &str, user: &str) -> Result<()>;
@@ -185,86 +185,61 @@ impl SharedState for State {
         Ok(conn.get(&key).await.with_context(|| format!("can't get {} from Redis", key))?)
     }
 
-    async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) -> Result<()> {
-        // local version:
-        // let room_info = self.lock();
-        // let mut room_info = room_info.unwrap();
-        // let room_info = room_info.rooms.entry(room).or_default();
-        // room_info.user_track_to_mime.insert((user, track), mime);
-
-        info!("add global cache ({}, {}) -> {}", user, track, mime);
-
-        // redis version:
+    async fn add_user_media_count(&self, room: &str, user: &str, mime: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
-        let redis_key = format!("utm#{}", room);
-        let hash_key = format!("{}#{}", user, track);
-        let _: Option<()> = conn.hset(redis_key.clone(), hash_key, mime).await.context("Redis hset failed")?;
+        let redis_key = format!("room#{}#media", room);
+        let key = format!("{}#{}", user, mime);    // e.g. video, audio
+        let _: Option<()> = conn.hincr(&redis_key, key, 1).await.context("Redis hincr failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
-    async fn get_user_track_to_mime(&self, room: &str) -> Result<HashMap<(String, String), String>> {
-        // local version:
-        // self.lock().unwrap().rooms.get(room).unwrap().user_track_to_mime.clone()  // TODO: avoid this clone?
-
-        // redis version:
+    async fn get_users_media_count(&self, room: &str) -> Result<HashMap<(String, String), u8>> {
         let mut conn = self.get_redis()?;
-        let redis_key = format!("utm#{}", room);
-        let utm: HashMap<String, String> = conn.hgetall(redis_key).await.context("Redis hgetall failed")?;
-        let mut result = HashMap::new();
-        for (k, v) in utm.into_iter() {
-            let mut it = k.splitn(2, "#");
-            if let Some((user, track)) = it.next().zip(it.next()) {
-                result.insert((user.to_string(), track.to_string()), v.to_string());
-            }
-        }
+        let redis_key = format!("room#{}#media", room);
+        let media: Vec<(String, u8)> = conn.hgetall(&redis_key).await.context("Redis hgetall failed")?;
+        let result = media.into_iter()
+            .filter_map(|(k, v)| {
+                let mut it = k.splitn(2, "#");
+                if let Some((user, mime)) = it.next().zip(it.next()) {
+                    return Some(((user.to_string(), mime.to_string()), v));
+                }
+                None
+            })
+            .collect();
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(result)
     }
 
-    async fn remove_user_track_to_mime(&self, room: &str, user: &str) -> Result<()> {
-        // local version:
-        // let mut tracks = vec![];
-        // let mut state = self.lock().unwrap();
-        // let room_obj = state.rooms.get(&room.to_string()).unwrap();
-        // for ((pub_user, track_id), _) in room_obj.user_track_to_mime.iter() {
-        //     if pub_user == &user {
-        //         tracks.push(track_id.to_string());
-        //     }
-        // }
-        // let user_track_to_mime = &mut state.rooms.get_mut(&room.to_string()).unwrap().user_track_to_mime;
-        // for track in tracks {
-        //     user_track_to_mime.remove(&(user.to_string(), track.to_string()));
-        // }
-
-        // redis version:
+    async fn remove_user_media_count(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
-        let redis_key = &format!("utm#{}", room);
-        let user_track_to_mime = self.get_user_track_to_mime(room).await.context("get user track to mime failed")?;
-        for ((pub_user, track_id), _) in user_track_to_mime.iter() {
-            if pub_user == &user {
-                let hash_key = format!("{}#{}", user, track_id);
-                let _: Option<()> = conn.hdel(redis_key, hash_key).await.context("Redis hdel failed")?;
-            }
-        }
+        let redis_key = format!("room#{}#media", room);
+        let video_key = format!("{}#{}", user, "video");
+        let audio_key = format!("{}#{}", user, "audio");
+        let _: Option<()> = conn.hdel(&redis_key, video_key).await.context("Redis hdel failed")?;
+        let _: Option<()> = conn.hdel(&redis_key, audio_key).await.context("Redis hdel failed")?;
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
     async fn add_publisher(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#pub_list", room);
-        let _: Option<()> = conn.sadd(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.sadd(&redis_key, user).await.context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
     async fn remove_publisher(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#pub_list", room);
-        let _: Option<()> = conn.srem(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.srem(&redis_key, user).await.context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
@@ -285,18 +260,18 @@ impl SharedState for State {
     async fn add_subscriber(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
-        let _: Option<()> = conn.sadd(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.sadd(&redis_key, user).await.context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
     async fn remove_subscriber(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
-        let _: Option<()> = conn.srem(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.srem(&redis_key, user).await.context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
