@@ -52,13 +52,7 @@ pub struct InternalState {
 #[derive(Debug, Default)]
 struct Room {
     name: String,
-    /// (user, track id) -> mime type
-    ///
-    /// usage for this:
-    /// 1. know how many media in a room
-    /// 2. know how many media for each publisher
-    user_track_to_mime: HashMap<(String, String), String>,
-    sub_peers: HashMap<String, PeerConnetionInfo>,
+    subs: HashMap<String, PeerConnetionInfo>,
 }
 
 #[derive(Debug, Default)]
@@ -324,7 +318,7 @@ impl SharedState for State {
         // TODO: convert this write lock to read lock, use field interior mutability
         let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room = state.rooms.entry(room.to_string()).or_default();
-        let user = room.sub_peers.entry(user.to_string()).or_default();
+        let user = room.subs.entry(user.to_string()).or_default();
         user.notify_message = Some(Arc::new(sender.clone()));
         Ok(())
     }
@@ -333,10 +327,10 @@ impl SharedState for State {
         // TODO: convert this write lock to read lock, use field interior mutability
         let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room_obj = state.rooms.entry(room.to_string()).or_default();
-        let _ = room_obj.sub_peers.remove(user);
+        let _ = room_obj.subs.remove(user);
         // if there is no subscribers for this room
         // clean up the up layer hashmap too
-        if room_obj.sub_peers.is_empty() {
+        if room_obj.subs.is_empty() {
             let _ = state.rooms.remove(room);
         }
         Ok(())
@@ -398,7 +392,7 @@ impl SharedState for State {
                 Some(room) => room,
                 None => return Ok(()),
             };
-            room.sub_peers
+            room.subs
                 .iter()
                 .filter_map(|(_, sub)| sub.notify_message.clone())
                 .collect::<Vec<_>>()
