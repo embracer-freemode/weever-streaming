@@ -50,7 +50,7 @@ use tokio::sync::oneshot;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::Instrument;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Weak};
 use std::collections::HashMap;
 use std::pin::Pin;
 
@@ -83,10 +83,31 @@ struct SubscriberDetails {
     user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
     user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
     rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-    notify_sender: Option<mpsc::Sender<Command>>,
-    notify_receiver: Option<mpsc::Receiver<Command>>,
+    notify_sender: RwLock<Option<mpsc::Sender<Command>>>,
+    notify_receiver: RwLock<Option<mpsc::Receiver<Command>>>,
     created: std::time::SystemTime,
     tokio_tasks: Arc<RwLock<Vec<JoinHandle<()>>>>,
+}
+
+struct Subscriber(Arc<SubscriberDetails>);
+struct SubscriberWeak(Weak<SubscriberDetails>);
+
+impl SubscriberWeak {
+    // Try upgrading a weak reference to a strong one
+    fn upgrade(&self) -> Option<Subscriber> {
+        self.0.upgrade().map(Subscriber)
+    }
+}
+
+// To be able to access the internal fields directly
+// We wrap the real things with reference counting and new type,
+// this will let us use the wrapping type like there is no wrap.
+impl std::ops::Deref for Subscriber {
+    type Target = SubscriberDetails;
+
+    fn deref(&self) -> &SubscriberDetails {
+        &self.0
+    }
 }
 
 // for logging only
@@ -96,7 +117,12 @@ impl std::ops::Drop for SubscriberDetails {
     }
 }
 
-impl SubscriberDetails {
+impl Subscriber {
+    // Downgrade the strong reference to a weak reference
+    fn downgrade(&self) -> SubscriberWeak {
+        SubscriberWeak(Arc::downgrade(&self.0))
+    }
+
     // Downgrade the strong reference to a weak reference
     fn pc_downgrade(&self) -> WeakPeerConnection {
         WeakPeerConnection(Arc::downgrade(&self.pc))
@@ -208,26 +234,18 @@ impl SubscriberDetails {
     }
 
     async fn add_transceivers_based_on_room(&self) -> Result<()> {
-        Self::_add_transceivers_based_on_room(
-            self.room.clone(),
-            self.user.clone(),
-            self.pc.clone(),
-            self.tracks.clone(),
-            self.rtp_senders.clone(),
-            self.user_media_to_tracks.clone(),
-            self.user_media_to_senders.clone(),
-        ).await
+        self._add_transceivers_based_on_room().await
     }
 
     /// Add transceiver based on room metadata from Redis
-    async fn _add_transceivers_based_on_room(
-            room: String,
-            sub_user: String,
-            pc: Arc<RTCPeerConnection>,
-            tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-            user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>) -> Result<()> {
+    async fn _add_transceivers_based_on_room(&self) -> Result<()> {
+        let room = &self.room;
+        let sub_user = &self.user;
+        let pc = &self.pc;
+        let tracks = &self.tracks;
+        let rtp_senders = &self.rtp_senders;
+        let user_media_to_tracks = &self.user_media_to_tracks;
+        let user_media_to_senders = &self.user_media_to_senders;
 
         let media = SHARED_STATE.get_users_media_count(&room).await?;
 
@@ -238,7 +256,7 @@ impl SubscriberDetails {
             // skip it if publisher is the same as subscriber
             // so we won't pull back our own media streams and cause echo effect
             // TODO: remove the hardcode "-screen" case
-            if pub_user == sub_user || pub_user == format!("{}-screen", sub_user){
+            if &pub_user == sub_user || pub_user == format!("{}-screen", sub_user){
                 continue;
             }
 
@@ -360,8 +378,8 @@ impl SubscriberDetails {
         if let Err(err) = result {
             error!("add_sub_notify failed: {:?}", err);
         }
-        self.notify_sender = Some(sender);
-        self.notify_receiver = Some(receiver);
+        *self.notify_sender.write().unwrap() = Some(sender);
+        *self.notify_receiver.write().unwrap() = Some(receiver);
     }
 
     fn deregister_notify_message(&mut self) {
@@ -384,17 +402,20 @@ impl SubscriberDetails {
 
     fn on_peer_connection_state_change(&self) -> OnPeerConnectionStateChangeHdlrFn {
         let span = tracing::Span::current();
-        let notify_close = self.notify_close.clone();
-        let created = self.created.clone();
-        let room = self.room.clone();
-        let user = self.user.clone();
+        let weak = self.downgrade();
         Box::new(move |s: RTCPeerConnectionState| {
             let _enter = span.enter();  // populate user & room info in following logs
             info!("PeerConnection State has changed: {}", s);
+
+            let sub = match weak.upgrade() {
+                Some(sub) => sub,
+                _ => return Box::pin(async {}),
+            };
+
             match s {
                 RTCPeerConnectionState::Connected => {
                     let now = std::time::SystemTime::now();
-                    let duration = match now.duration_since(created) {
+                    let duration = match now.duration_since(sub.created) {
                         Ok(d) => d,
                         Err(e) => {
                             error!("system time error: {}", e);
@@ -404,10 +425,8 @@ impl SubscriberDetails {
 
                     info!("Peer Connection connected! spent {} ms from created", duration);
 
-                    let room = room.clone();
-                    let user = user.clone();
                     return Box::pin(async move {
-                        catch(SHARED_STATE.add_subscriber(&room, &user)).await;
+                        catch(SHARED_STATE.add_subscriber(&sub.room, &sub.user)).await;
                     }.instrument(tracing::Span::current()));
                 },
                 RTCPeerConnectionState::Failed |
@@ -417,12 +436,10 @@ impl SubscriberDetails {
                     // In disconnected state, PeerConnection may still come back, e.g. reconnect using an ICE Restart.
                     // But let's cleanup everything for now.
                     info!("send close notification");
-                    notify_close.notify_waiters();
+                    sub.notify_close.notify_waiters();
 
-                    let room = room.clone();
-                    let user = user.clone();
                     return Box::pin(async move {
-                        catch(SHARED_STATE.remove_subscriber(&room, &user)).await;
+                        catch(SHARED_STATE.remove_subscriber(&sub.room, &sub.user)).await;
                     }.instrument(tracing::Span::current()));
                 },
                 _ => {}
@@ -441,15 +458,7 @@ impl SubscriberDetails {
 
     fn on_data_channel(&mut self) -> OnDataChannelHdlrFn {
         let span = tracing::Span::current();
-
-        let wpc = self.pc_downgrade();
-        let tracks = self.tracks.clone();
-        let rtp_senders = self.rtp_senders.clone();
-        let notify_message = Arc::new(tokio::sync::Mutex::new(self.notify_receiver.take().unwrap()));
-        let user_media_to_tracks = self.user_media_to_tracks.clone();
-        let user_media_to_senders = self.user_media_to_senders.clone();
-        let room = self.room.clone();
-        let user = self.user.clone();
+        let weak = self.downgrade();
 
         Box::new(move |dc: Arc<RTCDataChannel>| {
             let _enter = span.enter();  // populate user & room info in following logs
@@ -462,85 +471,68 @@ impl SubscriberDetails {
             let dc_id = dc.id();
             info!("New DataChannel {} {}", dc_label, dc_id);
 
+            let sub = match weak.upgrade() {
+                Some(sub) => sub,
+                _ => return Box::pin(async {}),
+            };
+
             // channel open handling
-            Self::on_data_channel_open(
-                room.clone(),
-                user.clone(),
-                wpc.clone(),
+            sub.on_data_channel_open(
                 dc,
                 dc_label,
                 dc_id.to_string(),
-                tracks.clone(),
-                rtp_senders.clone(),
-                notify_message.clone(),
-                user_media_to_tracks.clone(),
-                user_media_to_senders.clone())
+            )
         })
     }
 
-    fn on_data_channel_open(
-            room: String,
-            user: String,
-            wpc: WeakPeerConnection,
-            dc: Arc<RTCDataChannel>,
-            dc_label: String,
-            dc_id: String,
-            tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-            notify_message: Arc<tokio::sync::Mutex<mpsc::Receiver<Command>>>,
-            user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>)
+    fn on_data_channel_open(&self, dc: Arc<RTCDataChannel>, dc_label: String, dc_id: String)
         -> Pin<Box<tracing::instrument::Instrumented<impl std::future::Future<Output = ()>>>> {
 
+        let weak = self.downgrade();
+
         Box::pin(async move {
-            dc.on_open(Self::on_data_channel_sender(
-                    room,
-                    user,
-                    wpc.clone(),
-                    dc.clone(),
-                    dc_label.clone(),
-                    dc_id,
-                    tracks.clone(),
-                    rtp_senders.clone(),
-                    notify_message.clone(),
-                    user_media_to_tracks.clone(),
-                    user_media_to_senders.clone()))
-                .instrument(tracing::Span::current()).await;
+            let sub = match weak.upgrade() {
+                Some(sub) => sub,
+                _ => return,
+            };
+
+            dc.on_open(
+                sub.on_data_channel_sender(dc.clone(), dc_label.clone(), dc_id)
+            ).instrument(tracing::Span::current()).await;
 
             // Register text message handling
-            dc.on_message(Self::on_data_channel_msg(
-                    wpc,
-                    dc.clone(),
-                    dc_label))
-                .instrument(tracing::Span::current()).await;
+            dc.on_message(
+                sub.on_data_channel_msg(dc.clone(), dc_label)
+            ).instrument(tracing::Span::current()).await;
+
         }.instrument(tracing::Span::current()))
     }
 
-    fn on_data_channel_sender(room: String,
-                              user: String,
-                              wpc: WeakPeerConnection,
+    fn on_data_channel_sender(&self,
                               dc: Arc<RTCDataChannel>,
                               dc_label: String,
-                              dc_id: String,
-                              tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-                              rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-                              notify_message: Arc<tokio::sync::Mutex<mpsc::Receiver<Command>>>,
-                              user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-                              user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>) -> OnOpenHdlrFn {
+                              dc_id: String) -> OnOpenHdlrFn {
+
         let span = tracing::Span::current();
+        let weak = self.downgrade();
         Box::new(move || {
             let _enter = span.enter();  // populate user & room info in following logs
             info!("Data channel '{}'-'{}' open", dc_label, dc_id);
 
             Box::pin(async move {
-                let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
-                let max_time = Duration::from_secs(30);
-
-                // TODO: move this into the loop?
-                let pc = match wpc.upgrade() {
-                    None => return,
-                    Some(pc) => pc,
+                let sub = match weak.upgrade() {
+                    Some(sub) => sub,
+                    _ => return,
                 };
+
+                let pc = &sub.pc;
+
+                // wrapping for increase lifetime, cause we will have await later
+                let notify_message = sub.notify_receiver.write().unwrap().take().unwrap();
+                let notify_message = Arc::new(tokio::sync::Mutex::new(notify_message));
+                let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
+
+                let max_time = Duration::from_secs(30);
 
                 // ask for renegotiation immediately after datachannel is connected
                 // TODO: detect if there is media?
@@ -562,17 +554,7 @@ impl SubscriberDetails {
 
                         match cmd {
                             Command::PubJoin(join_user) => {
-                                Self::on_pub_join(
-                                    room.clone(),
-                                    join_user,
-                                    user.clone(),
-                                    pc.clone(),
-                                    tracks.clone(),
-                                    rtp_senders.clone(),
-                                    user_media_to_tracks.clone(),
-                                    user_media_to_senders.clone(),
-                                ).await;
-
+                                sub.on_pub_join(join_user).await;
                                 Self::send_data(dc.clone(), msg).await.unwrap();
                                 result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
                             },
@@ -606,8 +588,9 @@ impl SubscriberDetails {
         })
     }
 
-    fn on_data_channel_msg(wpc: WeakPeerConnection, dc: Arc<RTCDataChannel>, dc_label: String) -> OnMessageHdlrFn {
+    fn on_data_channel_msg(&self, dc: Arc<RTCDataChannel>, dc_label: String) -> OnMessageHdlrFn {
         let span = tracing::Span::current();
+        let wpc = self.pc_downgrade();
         Box::new(move |msg: DataChannelMessage| {
             let _enter = span.enter();  // populate user & room info in following logs
 
@@ -654,27 +637,9 @@ impl SubscriberDetails {
         })
     }
 
-    async fn on_pub_join(
-            room: String,
-            join_user: String,
-            sub_user: String,
-            pc: Arc<RTCPeerConnection>,
-            tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-            user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>) {
-
+    async fn on_pub_join(&self, join_user: String) {
         info!("pub join: {}", join_user);
-
-        catch(Self::_add_transceivers_based_on_room(
-            room,
-            sub_user,
-            pc,
-            tracks,
-            rtp_senders,
-            user_media_to_tracks,
-            user_media_to_senders,
-        )).await;
+        catch(self._add_transceivers_based_on_room()).await;
     }
 
     #[allow(dead_code)]
@@ -815,7 +780,7 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
     // NATS
     info!("getting NATS");
     let nc = SHARED_STATE.get_nats().context("get NATS client failed")?;
-    let peer_connection = Arc::new(SubscriberDetails::create_pc(
+    let peer_connection = Arc::new(Subscriber::create_pc(
             cli.stun,
             cli.turn,
             cli.turn_username,
@@ -823,7 +788,7 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
             cli.public_ip,
     ).await?);
 
-    let mut subscriber = SubscriberDetails {
+    let mut subscriber = Subscriber(Arc::new(SubscriberDetails {
         user: user.clone(),
         room: room.clone(),
         nats: nc.clone(),
@@ -833,11 +798,11 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         user_media_to_tracks: Default::default(),
         user_media_to_senders: Default::default(),
         rtp_senders: Default::default(),
-        notify_sender: None,
-        notify_receiver: None,
+        notify_sender: Default::default(),
+        notify_receiver: Default::default(),
         created: std::time::SystemTime::now(),
         tokio_tasks: Default::default(),
-    };
+    }));
 
     subscriber.add_transceivers_based_on_room().await?;
     subscriber.register_notify_message();
