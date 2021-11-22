@@ -207,8 +207,8 @@ impl SubscriberDetails {
         api.new_peer_connection(config).await.map_err(|e| anyhow!(e))
     }
 
-    async fn add_trasceivers_based_on_room(&self) -> Result<()> {
-        Self::_add_trasceivers_based_on_room(
+    async fn add_transceivers_based_on_room(&self) -> Result<()> {
+        Self::_add_transceivers_based_on_room(
             self.room.clone(),
             self.user.clone(),
             self.pc.clone(),
@@ -220,8 +220,7 @@ impl SubscriberDetails {
     }
 
     /// Add transceiver based on room metadata from Redis
-    /// TODO: when will we replace tracks (when same id leave and come back)
-    async fn _add_trasceivers_based_on_room(
+    async fn _add_transceivers_based_on_room(
             room: String,
             sub_user: String,
             pc: Arc<RTCPeerConnection>,
@@ -667,7 +666,7 @@ impl SubscriberDetails {
 
         info!("pub join: {}", join_user);
 
-        catch(Self::_add_trasceivers_based_on_room(
+        catch(Self::_add_transceivers_based_on_room(
             room,
             sub_user,
             pc,
@@ -840,7 +839,7 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         tokio_tasks: Default::default(),
     };
 
-    subscriber.add_trasceivers_based_on_room().await?;
+    subscriber.add_transceivers_based_on_room().await?;
     subscriber.register_notify_message();
 
     // Set the handler for ICE connection state
