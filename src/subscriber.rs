@@ -623,7 +623,10 @@ impl SubscriberDetails {
             info!("Message from DataChannel '{}': '{:.20}'", dc_label, msg_str);
 
             if msg_str.starts_with("SDP_OFFER ") {
-                let offer = msg_str.splitn(2, " ").skip(1).next().unwrap();
+                let offer = match msg_str.splitn(2, " ").skip(1).next() {
+                    Some(o) => o,
+                    _ => return Box::pin(async {}),
+                };
                 debug!("got new SDP offer: {}", offer);
                 // build SDP Offer type
                 let mut sdp = RTCSessionDescription::default();
@@ -747,7 +750,7 @@ impl SubscriberDetails {
 
         // Read RTP packets forever and send them to the WebRTC Client
         // NOTE: busy loop
-        self.tokio_tasks.write().unwrap().push(tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             use webrtc::Error;
             while let Some(msg) = sub.next().await {
                 let raw_rtp = msg.data;
@@ -757,8 +760,12 @@ impl SubscriberDetails {
                 // TODO: real dyanmic dispatch for RTP
                 // subject sample: "rtc.1234.user1.video.video1" "rtc.1234.user1.audio.audio1"
                 let mut it = msg.subject.rsplitn(4, ".").take(3);
-                let track_id = it.next().unwrap().to_string();
-                let user = it.skip(1).next().unwrap().to_string();
+
+                let (track_id, user) = match it.next().zip(it.skip(1).next()) {
+                    Some((t, u)) => (t.to_string(), u.to_string()),
+                    _ => continue,
+                };
+
                 let track = {
                     let tracks = tracks.read().unwrap();
                     let track = tracks.get(&(user, track_id));
@@ -784,7 +791,11 @@ impl SubscriberDetails {
                 }
             }
             info!("leaving NATS to RTP pull: {}", subject);
-        }));
+        }.instrument(tracing::Span::current()));
+
+        self.tokio_tasks.write()
+            .map_err(|e| anyhow!("get tokio_tasks as writer failed: {}", e))?
+            .push(task);
 
         Ok(())
     }
