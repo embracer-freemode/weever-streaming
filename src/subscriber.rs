@@ -532,7 +532,7 @@ impl Subscriber {
                 let notify_message = Arc::new(tokio::sync::Mutex::new(notify_message));
                 let mut notify_message = notify_message.lock().await;  // TODO: avoid this?
 
-                let max_time = Duration::from_secs(30);
+                let notify_close = sub.notify_close.clone();
 
                 // ask for renegotiation immediately after datachannel is connected
                 // TODO: detect if there is media?
@@ -540,47 +540,46 @@ impl Subscriber {
 
                 while result.is_ok() {
                     // use a timeout to make sure we have chance to leave the waiting task even it's closed
-                    // TODO: use notify_close directly
-                    let msg = timeout(max_time, notify_message.recv()).await;
-                    if let Ok(msg) = msg {
-                        // we get data before timeout
-                        let cmd = match msg {
-                            Some(cmd) => cmd,
-                            _ => break,     // e.g. alread closed
-                        };
+                    tokio::select! {
+                        _ = notify_close.notified() => break,
+                        msg = notify_message.recv() => {
+                            // we get data before timeout
+                            let cmd = match msg {
+                                Some(cmd) => cmd,
+                                _ => break,     // e.g. alread closed
+                            };
 
-                        info!("cmd from internal sender: {:?}", cmd);
-                        let msg = cmd.to_user_msg();
+                            info!("cmd from internal sender: {:?}", cmd);
+                            let msg = cmd.to_user_msg();
 
-                        match cmd {
-                            Command::PubJoin(join_user) => {
-                                sub.on_pub_join(join_user).await;
-                                Self::send_data(dc.clone(), msg).await.unwrap();
-                                result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
-                            },
-                            Command::PubLeft(_user) => {
-                                // NOTE: we don't delete track for now
-                                //       when publisher rejoin, we will replace tracks
+                            match cmd {
+                                Command::PubJoin(join_user) => {
+                                    sub.on_pub_join(join_user).await;
+                                    Self::send_data(dc.clone(), msg).await.unwrap();
+                                    result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                                },
+                                Command::PubLeft(_user) => {
+                                    // NOTE: we don't delete track for now
+                                    //       when publisher rejoin, we will replace tracks
 
-                                // let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
-                                // Self::on_pub_leave(
-                                //     left_user.to_string(),
-                                //     room.clone(),
-                                //     pc.clone(),
-                                //     media.clone(),
-                                //     tracks.clone(),
-                                //     rtp_senders.clone(),
-                                //     user_media_to_tracks.clone(),
-                                //     user_media_to_senders.clone(),
-                                // ).await;
+                                    // let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
+                                    // Self::on_pub_leave(
+                                    //     left_user.to_string(),
+                                    //     room.clone(),
+                                    //     pc.clone(),
+                                    //     media.clone(),
+                                    //     tracks.clone(),
+                                    //     rtp_senders.clone(),
+                                    //     user_media_to_tracks.clone(),
+                                    //     user_media_to_senders.clone(),
+                                    // ).await;
 
-                                Self::send_data(dc.clone(), msg).await.unwrap();
-                                result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
-                            },
+                                    Self::send_data(dc.clone(), msg).await.unwrap();
+                                    result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                                },
+                            }
                         }
-                    } else {
-                        result = Self::send_data(dc.clone(), "PING".to_string()).await;
-                    };
+                    }
                 }
 
                 info!("leaving data channel loop for '{}'-'{}'", dc_label, dc_id);
