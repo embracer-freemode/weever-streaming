@@ -547,7 +547,11 @@ impl Subscriber {
 
                 // ask for renegotiation immediately after datachannel is connected
                 // TODO: detect if there is media?
-                let mut result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                let mut result = {
+                    let mut is_doing_renegotiation = is_doing_renegotiation.lock().await;
+                    *is_doing_renegotiation = true;
+                    Self::send_data_renegotiation(dc.clone(), pc.clone()).await
+                };
 
                 while result.is_ok() {
                     // use a timeout to make sure we have chance to leave the waiting task even it's closed
