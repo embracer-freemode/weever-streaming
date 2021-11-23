@@ -87,6 +87,11 @@ struct SubscriberDetails {
     notify_receiver: RwLock<Option<mpsc::Receiver<Command>>>,
     created: std::time::SystemTime,
     tokio_tasks: Arc<RwLock<Vec<JoinHandle<()>>>>,
+    // guard for WebRTC flow
+    // so we will handle only one renegotiation at once
+    // in case there is many publisher come and go in very short interval
+    is_doing_renegotiation: Arc<tokio::sync::Mutex<bool>>,
+    need_another_renegotiation: Arc<tokio::sync::Mutex<bool>>,
 }
 
 struct Subscriber(Arc<SubscriberDetails>);
@@ -530,6 +535,8 @@ impl Subscriber {
 
                 let pc = &sub.pc;
                 let sub_id = sub.user.splitn(2, '+').take(1).next().unwrap_or("");  // "ID+RANDOM" -> "ID"
+                let is_doing_renegotiation = &sub.is_doing_renegotiation;
+                let need_another_renegotiation = &sub.need_another_renegotiation;
 
                 // wrapping for increase lifetime, cause we will have await later
                 let notify_message = sub.notify_receiver.write().unwrap().take().unwrap();
@@ -564,8 +571,19 @@ impl Subscriber {
                                         continue;
                                     }
                                     sub.on_pub_join(join_user).await;
-                                    Self::send_data(dc.clone(), msg).await.unwrap();
-                                    result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                                    result = Self::send_data(dc.clone(), msg).await;
+                                    // don't send RENEGOTIATION if we are not done with previous round
+                                    // it means frotend is still on going another renegotiation
+                                    let mut is_doing_renegotiation = is_doing_renegotiation.lock().await;
+                                    if !*is_doing_renegotiation {
+                                        info!("trigger renegotiation");
+                                        *is_doing_renegotiation = true;
+                                        result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                                    } else {
+                                        info!("mark as need renegotiation");
+                                        let mut need_another_renegotiation = need_another_renegotiation.lock().await;
+                                        *need_another_renegotiation = true;
+                                    }
                                 },
                                 Command::PubLeft(_user) => {
                                     // NOTE: we don't delete track for now
@@ -583,8 +601,19 @@ impl Subscriber {
                                     //     user_media_to_senders.clone(),
                                     // ).await;
 
-                                    Self::send_data(dc.clone(), msg).await.unwrap();
-                                    result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                                    result = Self::send_data(dc.clone(), msg).await;
+                                    // don't send RENEGOTIATION if we are not done with previous round
+                                    // it means frotend is still on going another renegotiation
+                                    let mut is_doing_renegotiation = is_doing_renegotiation.lock().await;
+                                    if !*is_doing_renegotiation {
+                                        info!("trigger renegotiation");
+                                        *is_doing_renegotiation = true;
+                                        result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                                    } else {
+                                        info!("mark as need renegotiation");
+                                        let mut need_another_renegotiation = need_another_renegotiation.lock().await;
+                                        *need_another_renegotiation = true;
+                                    }
                                 },
                             }
                         }
@@ -598,14 +627,16 @@ impl Subscriber {
 
     fn on_data_channel_msg(&self, dc: Arc<RTCDataChannel>, dc_label: String) -> OnMessageHdlrFn {
         let span = tracing::Span::current();
-        let wpc = self.pc_downgrade();
+        let weak = self.downgrade();
         Box::new(move |msg: DataChannelMessage| {
             let _enter = span.enter();  // populate user & room info in following logs
 
-            let pc = match wpc.upgrade() {
-                None => return Box::pin(async {}),
-                Some(pc) => pc,
+            let sub = match weak.upgrade() {
+                Some(sub) => sub,
+                _ => return Box::pin(async {}),
             };
+
+            let pc = sub.pc.clone();
 
             let dc = dc.clone();
 
@@ -623,6 +654,8 @@ impl Subscriber {
                 sdp.sdp_type = RTCSdpType::Offer;
                 sdp.sdp = offer.to_string();
                 let offer = sdp;
+                let need_another_renegotiation = sub.need_another_renegotiation.clone();
+                let is_doing_renegotiation = sub.is_doing_renegotiation.clone();
                 return Box::pin(async move {
                     let dc = dc.clone();
                     pc.set_remote_description(offer).await.unwrap();
@@ -632,6 +665,20 @@ impl Subscriber {
                     if let Some(answer) = pc.local_description().await {
                         info!("sent new SDP answer");
                         dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await.unwrap();
+                    }
+
+                    // check if we have another renegotiation on hold
+                    let mut need_another_renegotiation = need_another_renegotiation.lock().await;
+                    if *need_another_renegotiation {
+                        info!("trigger another round of renegotiation");
+                        *need_another_renegotiation = false;
+                        if let Err(err) = Self::send_data_renegotiation(dc.clone(), pc.clone()).await {
+                            error!("trigger another round of renegotiation failed: {:?}", err);
+                        }
+                    } else {
+                        info!("mark renegotiation as done");
+                        let mut is_doing_renegotiation = is_doing_renegotiation.lock().await;
+                        *is_doing_renegotiation = false;
                     }
                 }.instrument(span.clone()));
             } else if msg_str == "STOP" {
@@ -810,6 +857,8 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         notify_receiver: Default::default(),
         created: std::time::SystemTime::now(),
         tokio_tasks: Default::default(),
+        is_doing_renegotiation: Default::default(),
+        need_another_renegotiation: Default::default(),
     }));
 
     subscriber.add_transceivers_based_on_room().await?;
