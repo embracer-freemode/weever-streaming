@@ -252,11 +252,14 @@ impl Subscriber {
         let mut video_count = 0;
         let mut audio_count = 0;
 
+        let sub_id = sub_user.splitn(2, '+').take(1).next().unwrap_or("");  // "ID+RANDOM" -> "ID"
+
         for ((pub_user, mime), count) in media {
             // skip it if publisher is the same as subscriber
             // so we won't pull back our own media streams and cause echo effect
             // TODO: remove the hardcode "-screen" case
-            if &pub_user == sub_user || pub_user == format!("{}-screen", sub_user){
+            let pub_id = pub_user.splitn(2, '+').take(1).next().unwrap_or("");  // "ID+RANDOM" -> "ID"
+            if pub_id == sub_id || pub_id == format!("{}-screen", sub_id){
                 continue;
             }
 
@@ -526,6 +529,7 @@ impl Subscriber {
                 };
 
                 let pc = &sub.pc;
+                let sub_id = sub.user.splitn(2, '+').take(1).next().unwrap_or("");  // "ID+RANDOM" -> "ID"
 
                 // wrapping for increase lifetime, cause we will have await later
                 let notify_message = sub.notify_receiver.write().unwrap().take().unwrap();
@@ -554,6 +558,11 @@ impl Subscriber {
 
                             match cmd {
                                 Command::PubJoin(join_user) => {
+                                    let pub_id = join_user.splitn(2, '+').take(1).next().unwrap_or("");  // "ID+RANDOM" -> "ID"
+                                    // don't send PUB_JOIN and RENEGOTIATION if current subscriber is the coming publisher
+                                    if pub_id == sub_id {
+                                        continue;
+                                    }
                                     sub.on_pub_join(join_user).await;
                                     Self::send_data(dc.clone(), msg).await.unwrap();
                                     result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
