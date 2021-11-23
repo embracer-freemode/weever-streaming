@@ -4,7 +4,7 @@
 use crate::{
     cli,
     helper::catch,
-    state::{SHARED_STATE, SharedState},
+    state::{SHARED_STATE, SharedState, Command},
 };
 use anyhow::{Result, Context, anyhow};
 use log::{debug, info, warn, error};
@@ -48,7 +48,7 @@ use tokio::time::{Duration, timeout};
 use tokio::sync::oneshot;
 use tracing::Instrument;
 use std::pin::Pin;
-use std::sync::{Arc, Weak, atomic::{AtomicU8, Ordering}};
+use std::sync::{Arc, atomic::{AtomicU8, Ordering}};
 
 
 /////////////////////////
@@ -91,7 +91,7 @@ impl PublisherDetails {
         WeakPeerConnection(Arc::downgrade(&self.pc))
     }
 
-    async fn create_pc(stun: String,
+    async fn create_pc(_stun: String,
                        turn: Option<String>,
                        turn_username: Option<String>,
                        turn_password: Option<String>,
@@ -246,11 +246,10 @@ impl PublisherDetails {
                         _ => unreachable!(),
                     };
 
-                    catch(SHARED_STATE.add_user_track_to_mime(
-                        room.clone(),
-                        user.clone(),
-                        app_id.to_string(),
-                        kind,
+                    catch(SHARED_STATE.add_user_media_count(
+                        &room,
+                        &user,
+                        &kind,
                     )).await;
 
                     // if all the tranceivers have active track
@@ -312,6 +311,7 @@ impl PublisherDetails {
     fn spawn_rtp_to_nats(room: String, user: String, app_id: String, track: Arc<TrackRemote>, nats: nats::asynk::Connection) {
         // push RTP to NATS
         // use ID to disquish streams from same publisher
+        // NOTE: busy loop
         tokio::spawn(async move {
             let kind = track.kind().to_string();    // video/audio
             // e.g. "rtc.1234.pub1.video.video0"
@@ -445,8 +445,8 @@ impl PublisherDetails {
         }.instrument(tracing::Span::current()))
     }
 
-    fn on_data_channel_msg(room: String,
-                           user: String,
+    fn on_data_channel_msg(_room: String,
+                           _user: String,
                            wpc: WeakPeerConnection,
                            dc: Arc<RTCDataChannel>,
                            dc_label: String) -> OnMessageHdlrFn {
@@ -472,18 +472,8 @@ impl PublisherDetails {
                 sdp.sdp_type = RTCSdpType::Offer;
                 sdp.sdp = offer.to_string();
                 let offer = sdp;
-                let user = user.clone();
-                let room = room.clone();
                 return Box::pin(async move {
-                    // add new track for screen sharing
-                    // 4 tranceivers: data x 1, video x 2, audio x 1
-                    // TODO: add real condition to check if needed
-                    // if pc.get_transceivers().await.len() < 4 {
-                        // info!("adding new transceiver for screen sharing");
-                        // catch(SHARED_STATE.add_user_track_to_mime(room.clone(), user.clone(), "screen".to_string(), "video".to_string())).await;
-                        // pc.add_transceiver_from_kind(RTPCodecType::Video, &[]).await.unwrap();
-                    // }
-
+                    // TODO: dynamic add/remove media handling, and let subscribers know
                     let dc = dc.clone();
                     pc.set_remote_description(offer).await.unwrap();
                     info!("updated new SDP offer");
@@ -493,11 +483,6 @@ impl PublisherDetails {
                         info!("sent new SDP answer");
                         dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await.unwrap();
                     }
-
-                    // notify subscribers to pull new track
-                    // TODO: add condition to check if needed
-                    // FIXME: don't hardcode video & app_id
-                    catch(SHARED_STATE.send_pub_media_add(&room, &user, "video", "screen")).await;
                 }.instrument(span.clone()));
             } else if msg_str == "STOP" {
                 info!("actively close peer connection");
@@ -514,7 +499,7 @@ impl PublisherDetails {
     /// ask subscribers to renegotiation
     async fn notify_subs_for_join(room: &str, user: &str) {
         info!("notify subscribers for publisher join");
-        catch(SHARED_STATE.send_pub_join(room, user)).await;
+        catch(SHARED_STATE.send_command(room, Command::PubJoin(user.to_string()))).await;
     }
 
     /// tell subscribers a new publisher just leave
@@ -522,8 +507,8 @@ impl PublisherDetails {
         info!("notify subscribers for publisher leave");
         // remove from global state
         // TODO: better mechanism
-        catch(SHARED_STATE.remove_user_track_to_mime(&room, &user)).await;
-        catch(SHARED_STATE.send_pub_leave(&room, &user)).await;
+        catch(SHARED_STATE.remove_user_media_count(&room, &user)).await;
+        catch(SHARED_STATE.send_command(room, Command::PubLeft(user.to_string()))).await;
         Ok(())
     }
 }

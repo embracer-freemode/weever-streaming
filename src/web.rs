@@ -24,7 +24,7 @@ use rustls_pemfile::{certs, pkcs8_private_keys};
 
 
 /// Web server for communicating with web clients
-#[actix_web::main]
+#[tokio::main]
 pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     // load ssl keys
     let raw_certs = &mut std::io::BufReader::new(
@@ -52,12 +52,12 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     // Redis
     let redis_client = redis::Client::open(cli.redis.clone()).context("can't connect to Redis")?;
     let conn = redis_client.get_multiplexed_tokio_connection().await.context("can't get multiplexed Redis client")?;
-    SHARED_STATE.set_redis(conn);
+    SHARED_STATE.set_redis(conn)?;
 
     // NATS
     info!("connecting NATS");
     let nats = nats::asynk::connect(&cli.nats).await.context("can't connect to NATS")?;
-    SHARED_STATE.set_nats(nats);
+    SHARED_STATE.set_nats(nats)?;
     // run task for listening upcoming commands
     SHARED_STATE.listen_on_commands().await?;
 

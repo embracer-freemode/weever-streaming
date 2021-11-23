@@ -161,7 +161,7 @@ window.runPublisher = () => {
   // use a trailing random id to avoid duplication from same publisher
   let trailing = "+" + (+new Date).toString(36);
   let id = _id + trailing;
-  let screen_id = _id + "-screen" + trailing;
+  let _screen_id = _id + "-screen" + trailing;
 
   navigator.mediaDevices.getUserMedia({ video: true, audio: { echoCancellation: true } })
     .then(stream => {
@@ -216,6 +216,8 @@ window.runPublisher = () => {
 
         stream.getTracks().forEach(track => pub_screen_pc.addTrack(track, stream));
         document.getElementById("pub_video_screenshare").srcObject = stream;
+
+        let screen_id = _screen_id + (+new Date).toString(36);
 
         pub_screen_pc.createOffer()
           .then(offer => {

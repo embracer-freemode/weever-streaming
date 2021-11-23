@@ -1,19 +1,46 @@
 //! Sharing state for whole program.
-//! Currently, we share states across instances via Redis.
+//!
+//! The publisher metadata will share across instances (via Redis).
+//! The subscribe metadata will be per instance local only.
+//!
 //! We can implement multiple state mechanism as long as it fit the SharedState trait.
 
 use crate::helper::catch;
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, anyhow};
 use async_trait::async_trait;
 use log::{info, error};
 use tokio::sync::mpsc;
 use once_cell::sync::Lazy;
 use redis::aio::MultiplexedConnection;
 use redis::AsyncCommands;
+use bincode::{Decode, Encode, config::Configuration};
 use std::sync::{Arc, RwLock};
 use std::collections::{HashMap, HashSet};
 
 
+/// Command that we will send across instances.
+/// And we will send some of them to frontend after serialization.
+#[derive(Decode, Encode)]
+#[derive(Debug, Clone)]
+pub enum Command {
+    PubJoin(String),
+    PubLeft(String),
+}
+
+impl Command {
+    /// convert into messages that we forward to frontend
+    pub fn to_user_msg(&self) -> String {
+        match &self {
+            Self::PubJoin(user) => format!("PUB_JOIN {}", user),
+            Self::PubLeft(user) => format!("PUB_LEFT {}", user),
+        }
+    }
+}
+
+
+/// Global state for whole program
+/// It holds NATS & Redis connection,
+/// and per room metadata
 #[derive(Default)]
 pub struct InternalState {
     rooms: HashMap<String, Room>,
@@ -21,139 +48,110 @@ pub struct InternalState {
     redis: Option<MultiplexedConnection>,
 }
 
+/// Room metadata
 #[derive(Debug, Default)]
 struct Room {
     name: String,
-    /// (user, track id) -> mime type
-    ///
-    /// usage for this:
-    /// 1. know how many media in a room
-    /// 2. know how many media for each publisher
-    user_track_to_mime: HashMap<(String, String), String>,
-    sub_peers: HashMap<String, PeerConnetionInfo>,
-    /// user -> token
-    pub_tokens: HashMap<String, String>,
-    sub_tokens: HashMap<String, String>,
+    subs: HashMap<String, PeerConnetionInfo>,
 }
 
 #[derive(Debug, Default)]
 struct PeerConnetionInfo {
     name: String,
-    notify_message: Option<Arc<mpsc::Sender<String>>>,  // TODO: special enum for all the cases
+    notify_message: Option<Arc<mpsc::Sender<Command>>>,
 }
 
 pub type State = Lazy<RwLock<InternalState>>;
 pub static SHARED_STATE: State = Lazy::new(|| Default::default());
 
-// TODO: redesign the tracking data structure
+/// Interface for global state
+///
+/// NOTE:
+/// Current implementation use NATS & Redis.
+/// But we can have different implementation.
 #[async_trait]
 pub trait SharedState {
-    fn set_redis(&self, conn: MultiplexedConnection);
+    /// Set Redis connection
+    fn set_redis(&self, conn: MultiplexedConnection) -> Result<()>;
+    /// Get Redis connection
     fn get_redis(&self) -> Result<MultiplexedConnection>;
-    fn set_nats(&self, nats: nats::asynk::Connection);
+    /// Set NATS connection
+    fn set_nats(&self, nats: nats::asynk::Connection) -> Result<()>;
+    /// Get NATS connection
     fn get_nats(&self) -> Result<nats::asynk::Connection>;
-    async fn listen_on_commands(&self) -> Result<()>;
+
+    /// Set publisher authorization token
     async fn set_pub_token(&self, room: String, user: String, token: String) -> Result<()>;
+    /// Set subscriber authorization token
     async fn set_sub_token(&self, room: String, user: String, token: String) -> Result<()>;
+    /// Get publisher authorization token
     async fn get_pub_token(&self, room: &str, user: &str) -> Result<String>;
+    /// Get subscriber authorization token
     async fn get_sub_token(&self, room: &str, user: &str) -> Result<String>;
-    async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) -> Result<()>;
-    async fn get_user_track_to_mime(&self, room: &str) -> Result<HashMap<(String, String), String>>;
-    async fn remove_user_track_to_mime(&self, room: &str, user: &str) -> Result<()>;
+
+    async fn add_user_media_count(&self, room: &str, user: &str, mime: &str) -> Result<()>;
+    async fn get_users_media_count(&self, room: &str) -> Result<HashMap<(String, String), u8>>;
+    async fn remove_user_media_count(&self, room: &str, user: &str) -> Result<()>;
+
+    /// Add publisher to room publishers list
     async fn add_publisher(&self, room: &str, user: &str) -> Result<()>;
+    /// Remove publisher from room publishers list
     async fn remove_publisher(&self, room: &str, user: &str) -> Result<()>;
+    /// Fetch room publishers list
     async fn list_publishers(&self, room: &str) -> Result<HashSet<String>>;
+    /// Check if specific publisher is in room publishers list
     async fn exist_publisher(&self, room: &str, user: &str) -> Result<bool>;
+
+    /// Add subscriber to room subscribers list
     async fn add_subscriber(&self, room: &str, user: &str) -> Result<()>;
+    /// remove subscriber from room subscribers list
     async fn remove_subscriber(&self, room: &str, user: &str) -> Result<()>;
+    /// Fetch room subscribers list
     async fn list_subscribers(&self, room: &str) -> Result<HashSet<String>>;
+    /// Check if specific subscriber is in room subscribers list
     async fn exist_subscriber(&self, room: &str, user: &str) -> Result<bool>;
-    fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>);
 
-    async fn send_pub_join(&self, room: &str, pub_user: &str) -> Result<()>;
-    async fn on_pub_join(&self, room: &str, pub_user: &str) -> Result<()> ;
-    async fn send_pub_leave(&self, room: &str, pub_user: &str) -> Result<()>;
-    async fn on_pub_leave(&self, room: &str, pub_user: &str) -> Result<()> ;
+    /// Set Sender (for other people to talk to specific subscriber)
+    fn add_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<Command>) -> Result<()>;
+    /// Remove Sender (for other people to talk to specific subscriber)
+    fn remove_sub_notify(&self, room: &str, user: &str) -> Result<()>;
 
-    /// Ask all subscribers to do renegotiation
-    async fn send_all_subs_renegotiation(&self, room: &str) -> Result<()>;
-    async fn on_all_subs_renegotiation(&self, room: &str) -> Result<()>;
-
-    async fn send_pub_media_add(&self, room: &str, pub_user: &str, mime: &str, app_id: &str) -> Result<()>;
-    async fn on_pub_media_add(&self, room: &str, msg: &str) -> Result<()>;
-
-    // TODO: generic msg forward method for all subscribers
-
-    // fn send_sub_join();
-    // fn on_sub_join();
-    // fn send_sub_leave();
-    // fn on_sub_leave();
+    /// send cross instances commands, e.g. via NATS
+    async fn send_command(&self, room: &str, cmd: Command) -> Result<()>;
+    /// handling cross instances commands, e.g. via NATS
+    async fn on_command(&self, room: &str, cmd: &[u8]) -> Result<()>;
+    /// listen on cross instances commands, e.g. via NATS
+    async fn listen_on_commands(&self) -> Result<()>;
+    /// forward commands to each subscriber handler
+    async fn forward_to_all_subs(&self, room: &str, msg: Command) -> Result<()>;
 }
 
+/// implement cross instances communication for NATS & Redis
 #[async_trait]
 impl SharedState for State {
-    fn set_redis(&self, conn: MultiplexedConnection) {
-        let mut state = self.write().unwrap();
+    fn set_redis(&self, conn: MultiplexedConnection) -> Result<()> {
+        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         state.redis = Some(conn);
-    }
-
-    fn get_redis(&self) -> Result<MultiplexedConnection> {
-        let state = self.read().unwrap();
-        Ok(state.redis.as_ref().context("get Redis client failed")?.clone())
-    }
-
-    fn set_nats(&self, nats: nats::asynk::Connection) {
-        let mut state = self.write().unwrap();
-        state.nats = Some(nats);
-    }
-
-    fn get_nats(&self) -> Result<nats::asynk::Connection> {
-        let state = self.read().unwrap();
-        Ok(state.nats.as_ref().context("get NATS client failed")?.clone())
-    }
-
-    async fn listen_on_commands(&self) -> Result<()> {
-        let nats = self.get_nats().context("get NATS client failed")?;
-        // cmd.ROOM
-        // e.g. cmd.1234
-        let subject = "cmd.*";
-        let sub = nats.subscribe(subject).await?;
-
-        async fn process(msg: nats::asynk::Message) -> Result<()> {
-            let room = msg.subject.splitn(2, ".").skip(1).next().unwrap();
-            let msg = String::from_utf8(msg.data.to_vec()).unwrap();
-            info!("internal NATS cmd, room {} msg '{}'", room, msg);
-            if msg.starts_with("PUB_LEFT ") {
-                let user = msg.splitn(2, " ").skip(1).next().unwrap();
-                catch(SHARED_STATE.on_pub_leave(room, user)).await;
-            } else if msg.starts_with("PUB_JOIN ") {
-                let user = msg.splitn(2, " ").skip(1).next().unwrap();
-                catch(SHARED_STATE.on_pub_join(room, user)).await;
-            } else if msg.starts_with("PUB_MEDIA_ADD ") {
-                catch(SHARED_STATE.on_pub_media_add(room, &msg)).await;
-            } else if msg.starts_with("ALL_SUBS_RENEGOTIATION") {
-                catch(SHARED_STATE.on_all_subs_renegotiation(room)).await;
-            }
-            Ok(())
-        }
-
-        tokio::spawn(async move {
-            // TODO: will we exit this loop when disconnect?
-            while let Some(msg) = sub.next().await {
-                tokio::spawn(catch(process(msg)));
-            }
-        });
-
         Ok(())
     }
 
-    async fn set_pub_token(&self, room: String, user: String, token: String) -> Result<()> {
-        // local version:
-        // let mut state = self.lock().unwrap();
-        // let room = state.rooms.entry(room).or_default();
-        // let pub_token = room.pub_tokens.entry(user).or_default();
-        // *pub_token = token;
+    fn get_redis(&self) -> Result<MultiplexedConnection> {
+        let state = self.read().map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
+        Ok(state.redis.as_ref().context("get Redis client failed")?.clone())
+    }
 
+    fn set_nats(&self, nats: nats::asynk::Connection) -> Result<()> {
+        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
+        state.nats = Some(nats);
+        Ok(())
+    }
+
+    fn get_nats(&self) -> Result<nats::asynk::Connection> {
+        let state = self.read().map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
+        Ok(state.nats.as_ref().context("get NATS client failed")?.clone())
+    }
+
+    async fn set_pub_token(&self, room: String, user: String, token: String) -> Result<()> {
         // redis version:
         let mut conn = self.get_redis()?;
         let key = format!("token#pub#{}#{}", room, user);
@@ -164,12 +162,6 @@ impl SharedState for State {
     }
 
     async fn set_sub_token(&self, room: String, user: String, token: String) -> Result<()> {
-        // local version:
-        // let mut state = self.lock().unwrap();
-        // let room = state.rooms.entry(room).or_default();
-        // let sub_token = room.sub_tokens.entry(user).or_default();
-        // *sub_token = token;
-
         // redis version:
         let mut conn = self.get_redis()?;
         let key = format!("token#sub#{}#{}", room, user);
@@ -180,11 +172,6 @@ impl SharedState for State {
     }
 
     async fn get_pub_token(&self, room: &str, user: &str) -> Result<String> {
-        // local version:
-        // let mut state = self.lock().unwrap();
-        // let room = state.rooms.entry(room.to_string()).or_default();
-        // room.pub_tokens.get(user).cloned()
-
         // redis version:
         let mut conn = self.get_redis()?;
         let key = format!("token#pub#{}#{}", room, user);
@@ -192,97 +179,67 @@ impl SharedState for State {
     }
 
     async fn get_sub_token(&self, room: &str, user: &str) -> Result<String> {
-        // local version:
-        // let mut state = self.lock().unwrap();
-        // let room = state.rooms.entry(room.to_string()).or_default();
-        // room.sub_tokens.get(user).cloned()
-
         // redis version:
         let mut conn = self.get_redis()?;
         let key = format!("token#sub#{}#{}", room, user);
         Ok(conn.get(&key).await.with_context(|| format!("can't get {} from Redis", key))?)
     }
 
-    async fn add_user_track_to_mime(&self, room: String, user: String, track: String, mime: String) -> Result<()> {
-        // local version:
-        // let room_info = self.lock();
-        // let mut room_info = room_info.unwrap();
-        // let room_info = room_info.rooms.entry(room).or_default();
-        // room_info.user_track_to_mime.insert((user, track), mime);
-
-        info!("add global cache ({}, {}) -> {}", user, track, mime);
-
-        // redis version:
+    async fn add_user_media_count(&self, room: &str, user: &str, mime: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
-        let redis_key = format!("utm#{}", room);
-        let hash_key = format!("{}#{}", user, track);
-        let _: Option<()> = conn.hset(redis_key.clone(), hash_key, mime).await.context("Redis hset failed")?;
+        let redis_key = format!("room#{}#media", room);
+        let key = format!("{}#{}", user, mime);    // e.g. video, audio
+        let _: Option<()> = conn.hincr(&redis_key, key, 1).await.context("Redis hincr failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
-    async fn get_user_track_to_mime(&self, room: &str) -> Result<HashMap<(String, String), String>> {
-        // local version:
-        // self.lock().unwrap().rooms.get(room).unwrap().user_track_to_mime.clone()  // TODO: avoid this clone?
-
-        // redis version:
+    async fn get_users_media_count(&self, room: &str) -> Result<HashMap<(String, String), u8>> {
         let mut conn = self.get_redis()?;
-        let redis_key = format!("utm#{}", room);
-        let utm: HashMap<String, String> = conn.hgetall(redis_key).await.context("Redis hgetall failed")?;
-        let mut result = HashMap::new();
-        for (k, v) in utm.into_iter() {
-            let mut it = k.splitn(2, "#");
-            let user = it.next().unwrap();
-            let track = it.next().unwrap();
-            result.insert((user.to_string(), track.to_string()), v.to_string());
-        }
+        let redis_key = format!("room#{}#media", room);
+        let media: Vec<(String, u8)> = conn.hgetall(&redis_key).await.context("Redis hgetall failed")?;
+        let result = media.into_iter()
+            .filter_map(|(k, v)| {
+                let mut it = k.splitn(2, "#");
+                if let Some((user, mime)) = it.next().zip(it.next()) {
+                    return Some(((user.to_string(), mime.to_string()), v));
+                }
+                None
+            })
+            .collect();
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(result)
     }
 
-    async fn remove_user_track_to_mime(&self, room: &str, user: &str) -> Result<()> {
-        // local version:
-        // let mut tracks = vec![];
-        // let mut state = self.lock().unwrap();
-        // let room_obj = state.rooms.get(&room.to_string()).unwrap();
-        // for ((pub_user, track_id), _) in room_obj.user_track_to_mime.iter() {
-        //     if pub_user == &user {
-        //         tracks.push(track_id.to_string());
-        //     }
-        // }
-        // let user_track_to_mime = &mut state.rooms.get_mut(&room.to_string()).unwrap().user_track_to_mime;
-        // for track in tracks {
-        //     user_track_to_mime.remove(&(user.to_string(), track.to_string()));
-        // }
-
-        // redis version:
+    async fn remove_user_media_count(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
-        let redis_key = &format!("utm#{}", room);
-        let user_track_to_mime = self.get_user_track_to_mime(room).await.context("get user track to mime failed")?;
-        for ((pub_user, track_id), _) in user_track_to_mime.iter() {
-            if pub_user == &user {
-                let hash_key = format!("{}#{}", user, track_id);
-                let _: Option<()> = conn.hdel(redis_key, hash_key).await.context("Redis hdel failed")?;
-            }
-        }
+        let redis_key = format!("room#{}#media", room);
+        let video_key = format!("{}#{}", user, "video");
+        let audio_key = format!("{}#{}", user, "audio");
+        let _: Option<()> = conn.hdel(&redis_key, video_key).await.context("Redis hdel failed")?;
+        let _: Option<()> = conn.hdel(&redis_key, audio_key).await.context("Redis hdel failed")?;
+        // set Redis key TTL to 1 day
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
     async fn add_publisher(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#pub_list", room);
-        let _: Option<()> = conn.sadd(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.sadd(&redis_key, user).await.context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
     async fn remove_publisher(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#pub_list", room);
-        let _: Option<()> = conn.srem(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.srem(&redis_key, user).await.context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
@@ -303,18 +260,18 @@ impl SharedState for State {
     async fn add_subscriber(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
-        let _: Option<()> = conn.sadd(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.sadd(&redis_key, user).await.context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
     async fn remove_subscriber(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
-        let _: Option<()> = conn.srem(redis_key.clone(), user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn.srem(&redis_key, user).await.context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
         Ok(())
     }
 
@@ -332,115 +289,91 @@ impl SharedState for State {
         Ok(result)
     }
 
-    fn set_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<String>) {
+    fn add_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<Command>) -> Result<()> {
         // TODO: convert this write lock to read lock, use field interior mutability
-        let mut state = self.write().unwrap();
+        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room = state.rooms.entry(room.to_string()).or_default();
-        let user = room.sub_peers.entry(user.to_string()).or_default();
+        let user = room.subs.entry(user.to_string()).or_default();
         user.notify_message = Some(Arc::new(sender.clone()));
-    }
-
-    async fn send_pub_join(&self, room: &str, pub_user: &str) -> Result<()> {
-        let subject = format!("cmd.{}", room);
-        let msg = format!("PUB_JOIN {}", pub_user);
-        let nats = self.get_nats().context("get NATS client failed")?;
-        nats.publish(&subject, msg).await.context("publish PUB_JOIN to NATS failed")?;
         Ok(())
     }
 
-    async fn on_pub_join(&self, room: &str, pub_user: &str) -> Result<()> {
-        let subs = {
-            let state = self.read().unwrap();
-            let room = match state.rooms.get(room) {
-                Some(room) => room,
-                None => return Ok(()),
-            };
-            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
-        };
-        for sub in subs {
-            // TODO: special enum for all the cases
-            let result = sub.send(format!("PUB_JOIN {}", pub_user)).await.context("send PUB_JOIN to mpsc Sender failed");
-            if let Err(err) = result {
-                error!("{:?}", err);
-            }
+    fn remove_sub_notify(&self, room: &str, user: &str) -> Result<()> {
+        // TODO: convert this write lock to read lock, use field interior mutability
+        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
+        let room_obj = state.rooms.entry(room.to_string()).or_default();
+        let _ = room_obj.subs.remove(user);
+        // if there is no subscribers for this room
+        // clean up the up layer hashmap too
+        if room_obj.subs.is_empty() {
+            let _ = state.rooms.remove(room);
         }
         Ok(())
     }
 
-    async fn send_pub_leave(&self, room: &str, pub_user: &str) -> Result<()> {
+    async fn send_command(&self, room: &str, cmd: Command) -> Result<()> {
         let subject = format!("cmd.{}", room);
-        let msg = format!("PUB_LEFT {}", pub_user);
+        let mut slice = [0u8; 64];
+        let length = bincode::encode_into_slice(&cmd, &mut slice, Configuration::standard())
+            .with_context(|| format!("encode command error: {:?}", cmd))?;
+        let payload = &slice[..length];
         let nats = self.get_nats().context("get NATS client failed")?;
-        nats.publish(&subject, msg).await.context("publish PUB_LEFT to NATS failed")?;
+        nats.publish(&subject, payload).await.context("publish PUB_JOIN to NATS failed")?;
         Ok(())
     }
 
-    async fn on_pub_leave(&self, room: &str, pub_user: &str) -> Result<()> {
-        let subs = {
-            let state = self.read().unwrap();
-            let room = match state.rooms.get(room) {
-                Some(room) => room,
-                None => return Ok(()),
-            };
-            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
-        };
-        for sub in subs {
-            // TODO: special enum for all the cases
-            let result = sub.send(format!("PUB_LEFT {}", pub_user)).await.context("send PUB_LEFT to mpsc Sender failed");
-            if let Err(err) = result {
-                error!("{:?}", err);
-            }
+    async fn on_command(&self, room: &str, cmd: &[u8]) -> Result<()> {
+        let cmd: Command = bincode::decode_from_slice(&cmd, Configuration::standard()).context("decode command error")?;
+        info!("on cmd, room {} msg '{:?}'", room, cmd);
+        match cmd {
+            Command::PubJoin(_) => {
+                self.forward_to_all_subs(room, cmd).await?;
+            },
+            Command::PubLeft(_) => {
+                self.forward_to_all_subs(room, cmd).await?;
+            },
         }
         Ok(())
     }
 
-    async fn send_all_subs_renegotiation(&self, room: &str) -> Result<()> {
-        let subject = format!("cmd.{}", room);
-        let msg = "ALL_SUBS_RENEGOTIATION".to_string();
+    async fn listen_on_commands(&self) -> Result<()> {
         let nats = self.get_nats().context("get NATS client failed")?;
-        nats.publish(&subject, msg).await.context("publish ALL_SUBS_RENEGOTIATION to NATS failed")?;
-        Ok(())
-    }
+        // cmd.ROOM
+        // e.g. cmd.1234
+        let subject = "cmd.*";
+        let sub = nats.subscribe(subject).await.context("NATS subscribe for commands failed")?;
 
-    async fn on_all_subs_renegotiation(&self, room: &str) -> Result<()> {
-        let subs = {
-            let state = self.read().unwrap();
-            let room = match state.rooms.get(room) {
-                Some(room) => room,
-                None => return Ok(()),
-            };
-            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
-        };
-        for sub in subs {
-            // TODO: special enum for all the cases
-            let result = sub.send("RENEGOTIATION".to_string()).await.context("send RENEGOTIATION to mpsc Sender failed");
-            if let Err(err) = result {
-                error!("{:?}", err);
-            }
+        async fn process(msg: nats::asynk::Message) -> Result<()> {
+            let room = msg.subject.splitn(2, ".").skip(1).next()
+                .context("extract room from NATS subject failed")?;
+            SHARED_STATE.on_command(room, &msg.data).await?;
+            Ok(())
         }
+
+        tokio::spawn(async move {
+            // TODO: will we exit this loop when disconnect?
+            while let Some(msg) = sub.next().await {
+                tokio::spawn(catch(process(msg)));
+            }
+        });
+
         Ok(())
     }
 
-    async fn send_pub_media_add(&self, room: &str, pub_user: &str, mime: &str, app_id: &str) -> Result<()> {
-        let subject = format!("cmd.{}", room);
-        let msg = format!("PUB_MEDIA_ADD {} {} {} {}", room, pub_user, mime, app_id);
-        let nats = self.get_nats().context("get NATS client failed")?;
-        nats.publish(&subject, msg).await.context("publish PUB_MEDIA_ADD to NATS failed")?;
-        Ok(())
-    }
-
-    async fn on_pub_media_add(&self, room: &str, msg: &str) -> Result<()> {
+    async fn forward_to_all_subs(&self, room: &str, cmd: Command) -> Result<()> {
         let subs = {
-            let state = self.read().unwrap();
+            let state = self.read().map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
             let room = match state.rooms.get(room) {
                 Some(room) => room,
                 None => return Ok(()),
             };
-            room.sub_peers.iter().map(|(_, sub)| sub.notify_message.as_ref().unwrap().clone()).collect::<Vec<_>>()
+            room.subs
+                .iter()
+                .filter_map(|(_, sub)| sub.notify_message.clone())
+                .collect::<Vec<_>>()
         };
         for sub in subs {
-            // TODO: special enum for all the cases
-            let result = sub.send(msg.to_string()).await.context("send PUB_MEDIA_ADD to mpsc Sender failed");
+            let result = sub.send(cmd.clone()).await.with_context(|| format!("send {:?} to mpsc Sender failed", cmd));
             if let Err(err) = result {
                 error!("{:?}", err);
             }
