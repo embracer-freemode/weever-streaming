@@ -616,6 +616,9 @@ Future Works
 * Stability
     - [X] compiler warnings cleanup
     - [X] set TTL for all Redis key/value (1 day)
+    - [X] don't send PUB_JOIN to subscriber if publisher is exactly the subscriber
+    - [X] don't send RENEGOTIATION if subscriber is ongoing another renegotiation, hold and send later to avoid frontend state issue
+    - [X] don't change transceivers if subscriber is ongoing renegotiation, hold and change later
     - [ ] make sure all Tokio tasks will end when clients leave
     - [ ] unwrap usage cleanup
     - [ ] WebRTC spec reading
@@ -623,15 +626,20 @@ Future Works
 
 * Performance Optimization
     - [X] (subscriber) don't create transceiver at first hand when publisher is the same as subscriber
+    - [X] don't pull streams for subscriber, if the publisher is with same id
     - [ ] use same WebRTC connection for screen share (media add/remove for same publisher)
-    - [ ] don't pull streams for subscriber, if the publisher is with same id
     - [ ] compile with `RUSTFLAGS="-Z sanitizer=leak"` and test, make sure there is no memory leak
     - [ ] faster showing on subscribers' site when publisher join
     - [ ] WebRTC.rs stack digging
 
 * Monitor
+    - [ ] Prometheus endpoint for per room metrics
     - [ ] use spans info to show on Grafana (by room)
     - [ ] use spans info to show on Grafana (by user)
+
+* Demo Site
+    - [X] select video resolution (e.g. 720p, 240p)
+    - [X] publisher can select enable audio/video or not
 
 * Misc
     - [X] in-cluster API for publishers list
@@ -653,3 +661,8 @@ Future Works
     - [ ] share WebRTC generic part of publisher/subscriber code
     - [ ] redesign the room metadata
     - [ ] redesign the SDP flow
+
+* Docs
+    - [ ] service internal command list
+    - [ ] data channel command list
+    - [ ] WebRTC flow explain for publisher/subscriber
