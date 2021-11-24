@@ -96,6 +96,17 @@ window.createSubscriber = () => {
 room: <input id="run_pub_room" type="text"></input><br/>
 id: <input id="run_pub_id" type="text"></input><br/>
 token: <input id="run_pub_token" type="text"></input><br/>
+enable video: <input type="checkbox" id="run_pub_enable_video" checked><br/>
+enable audio: <input type="checkbox" id="run_pub_enable_audio" checked><br/>
+video resolution: <select id="run_pub_video_resolution">
+    <option value="240">240p</option>
+    <option value="480">480p</option>
+    <option value="720" selected>720p</option>
+    <option value="1080">1080p</option>
+    <option value="1440">1440p</option>
+    <option value="2160">2160p (4K)</option>
+    <option value="4320">4320p (8K)</option>
+</select><br/>
 <button id="run_pub_start" onclick="window.runPublisher()">Run Publisher</button>
 <button id="run_pub_stop" hidden>Stop Publisher</button><br/><br/>
 <button id="run_pub_screenshare" hidden> Start Screen Share </button>
@@ -163,7 +174,41 @@ window.runPublisher = () => {
   let id = _id + trailing;
   let _screen_id = _id + "-screen" + trailing;
 
-  navigator.mediaDevices.getUserMedia({ video: true, audio: { echoCancellation: true } })
+  let media_track_constraits = {};
+  if (document.getElementById("run_pub_enable_video").checked) {
+    switch (document.getElementById("run_pub_video_resolution").value) {
+      case "240":
+        media_track_constraits["video"] = { "width": 320, "height": 240 };
+        break;
+      case "480":
+        media_track_constraits["video"] = { "width": 640, "height": 480 };
+        break;
+      case "720":
+        media_track_constraits["video"] = { "width": 1280, "height": 720 };
+        break;
+      case "1080":
+        media_track_constraits["video"] = { "width": 1920, "height": 1080 };
+        break;
+      case "1440":
+        media_track_constraits["video"] = { "width": 2560, "height": 1440 };
+        break;
+      case "2160":
+        media_track_constraits["video"] = { "width": 3840, "height": 2160 };
+        break;
+      case "4320":
+        media_track_constraits["video"] = { "width": 7680, "height": 4320 };
+        break;
+      default:
+        media_track_constraits["video"] = { "width": 1280, "height": 720 };
+    }
+  }
+  if (document.getElementById("run_pub_enable_audio").checked) {
+    media_track_constraits["audio"] = { echoCancellation: true };
+  }
+
+  log("media constraints: " + JSON.stringify(media_track_constraits));
+
+  navigator.mediaDevices.getUserMedia(media_track_constraits)
     .then(stream => {
       stream.getTracks().forEach(track => pub_pc.addTrack(track, stream))
       document.getElementById("pub_video").srcObject = stream
