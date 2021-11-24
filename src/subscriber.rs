@@ -550,6 +550,7 @@ impl Subscriber {
                 let mut result = {
                     let mut is_doing_renegotiation = is_doing_renegotiation.lock().await;
                     *is_doing_renegotiation = true;
+                    sub.add_transceivers_based_on_room().await.unwrap();
                     Self::send_data_renegotiation(dc.clone(), pc.clone()).await
                 };
 
@@ -866,7 +867,6 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         need_another_renegotiation: Default::default(),
     }));
 
-    subscriber.add_transceivers_based_on_room().await?;
     subscriber.register_notify_message();
 
     // Set the handler for ICE connection state
