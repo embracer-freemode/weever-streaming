@@ -574,7 +574,6 @@ impl Subscriber {
                                     if pub_id == sub_id {
                                         continue;
                                     }
-                                    sub.on_pub_join(join_user).await;
                                     result = Self::send_data(dc.clone(), msg).await;
                                     // don't send RENEGOTIATION if we are not done with previous round
                                     // it means frotend is still on going another renegotiation
@@ -582,6 +581,7 @@ impl Subscriber {
                                     if !*is_doing_renegotiation {
                                         info!("trigger renegotiation");
                                         *is_doing_renegotiation = true;
+                                        sub.on_pub_join(join_user).await;
                                         result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
                                     } else {
                                         info!("mark as need renegotiation");
@@ -675,6 +675,7 @@ impl Subscriber {
                     let mut need_another_renegotiation = need_another_renegotiation.lock().await;
                     if *need_another_renegotiation {
                         info!("trigger another round of renegotiation");
+                        sub.add_transceivers_based_on_room().await.unwrap();    // update the transceivers now
                         *need_another_renegotiation = false;
                         if let Err(err) = Self::send_data_renegotiation(dc.clone(), pc.clone()).await {
                             error!("trigger another round of renegotiation failed: {:?}", err);
