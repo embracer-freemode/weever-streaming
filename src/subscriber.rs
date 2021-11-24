@@ -133,8 +133,8 @@ impl Subscriber {
         WeakPeerConnection(Arc::downgrade(&self.pc))
     }
 
-    fn get_nats_subect(&self) -> String {
-        format!("rtc.{}.*.*.*", self.room)
+    fn get_nats_subect(&self, user: &str, mime: &str, app_id: &str) -> String {
+        format!("rtc.{}.{}.{}.{}", self.room, user, mime, app_id)
     }
 
     async fn create_pc(_stun: String,
@@ -251,6 +251,7 @@ impl Subscriber {
         let rtp_senders = &self.rtp_senders;
         let user_media_to_tracks = &self.user_media_to_tracks;
         let user_media_to_senders = &self.user_media_to_senders;
+        let sub = self;
 
         let media = SHARED_STATE.get_users_media_count(&room).await?;
 
@@ -259,7 +260,7 @@ impl Subscriber {
 
         let sub_id = sub_user.splitn(2, '+').take(1).next().unwrap_or("");  // "ID+RANDOM" -> "ID"
 
-        for ((pub_user, mime), count) in media {
+        for ((pub_user, raw_mime), count) in media {
             // skip it if publisher is the same as subscriber
             // so we won't pull back our own media streams and cause echo effect
             // TODO: remove the hardcode "-screen" case
@@ -270,7 +271,7 @@ impl Subscriber {
 
             for index in 0..count {
                 // FIXME: refactor related stuffs
-                let track_id = format!("{}{}", mime, index);
+                let track_id = format!("{}{}", raw_mime, index);
 
                 if tracks.read()
                          .map_err(|e| anyhow!("get tracks as reader failed: {}", e))?
@@ -280,7 +281,7 @@ impl Subscriber {
 
                 // hardcode this for now
                 // we may need to change this later
-                let app_id = match mime.as_ref() {
+                let app_id = match raw_mime.as_ref() {
                     "video" => {
                         let result = format!("video{}", video_count);
                         video_count += 1;
@@ -294,7 +295,7 @@ impl Subscriber {
                     _ => unreachable!(),
                 };
 
-                let mime = match mime.as_ref() {
+                let mime = match raw_mime.as_ref() {
                     "video" => MIME_TYPE_VP8,
                     "audio" => MIME_TYPE_OPUS,
                     _ => unreachable!(),
@@ -341,6 +342,8 @@ impl Subscriber {
                 let rtp_sender = pc
                     .add_track(Arc::clone(&track) as Arc<dyn TrackLocal + Send + Sync>)
                     .await.context("add track to PeerConnection failed")?;
+
+                sub.spawn_rtp_foward_task(track, &pub_user, &raw_mime, &track_id).await?;
 
                 rtp_senders.write()
                     .map_err(|e| anyhow!("get rtp_senders as writer failed: {}", e))?
@@ -767,42 +770,19 @@ impl Subscriber {
         dc.send_text(format!("RENEGOTIATION videos {} audios {}", videos, audios)).await
     }
 
-    async fn spawn_rtp_foward_task(&self) -> Result<()> {
+    async fn spawn_rtp_foward_task(&self, track: Arc<TrackLocalStaticRTP>, user: &str, mime: &str, app_id: &str) -> Result<()> {
         // get RTP from NATS
-        let subject = self.get_nats_subect();
+        let subject = self.get_nats_subect(user, mime, app_id);
+        info!("subscribe NATS: {}", subject);
         let sub = self.nats.subscribe(&subject).await?;
-        let tracks = self.tracks.clone();
 
         // Read RTP packets forever and send them to the WebRTC Client
         // NOTE: busy loop
         let task = tokio::spawn(async move {
             use webrtc::Error;
             while let Some(msg) = sub.next().await {
+                // TODO: make sure we leave the loop when subscriber/publisher leave
                 let raw_rtp = msg.data;
-
-                // TODO: leave the loop when subscriber leaves
-
-                // TODO: real dyanmic dispatch for RTP
-                // subject sample: "rtc.1234.user1.video.video1" "rtc.1234.user1.audio.audio1"
-                let mut it = msg.subject.rsplitn(4, ".").take(3);
-
-                let (track_id, user) = match it.next().zip(it.skip(1).next()) {
-                    Some((t, u)) => (t.to_string(), u.to_string()),
-                    _ => continue,
-                };
-
-                let track = {
-                    let tracks = tracks.read().unwrap();
-                    let track = tracks.get(&(user, track_id));
-                    // if we don't have corresponding track
-                    // either we are not ready for this
-                    // or the RTP is from ourself (publisher == subscriber)
-                    if track.is_none() {
-                        continue;
-                    }
-                    track.unwrap().clone()
-                };
-
                 if let Err(err) = track.write(&raw_rtp).await {
                     error!("nats forward err: {:?}", err);
                     if Error::ErrClosedPipe == err {
@@ -915,8 +895,6 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         // TODO: when will this happen?
         warn!("generate local_description failed!");
     }
-
-    subscriber.spawn_rtp_foward_task().await?;
 
     // limit a subscriber to 3 hours for now
     // after 3 hours, we close the connection
