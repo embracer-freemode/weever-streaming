@@ -107,6 +107,7 @@ video resolution: <select id="run_pub_video_resolution">
     <option value="2160">2160p (4K)</option>
     <option value="4320">4320p (8K)</option>
 </select><br/>
+video framerate: <input type="number" id="run_pub_video_framerate" min="0" max="60" value="30"></br>
 <button id="run_pub_start" onclick="window.runPublisher()">Run Publisher</button>
 <button id="run_pub_stop" hidden>Stop Publisher</button><br/><br/>
 <button id="run_pub_screenshare" hidden> Start Screen Share </button>
@@ -201,6 +202,7 @@ window.runPublisher = () => {
       default:
         media_track_constraits["video"] = { "width": 1280, "height": 720 };
     }
+    media_track_constraits["video"]["frameRate"] = document.getElementById("run_pub_video_framerate").value
   }
   if (document.getElementById("run_pub_enable_audio").checked) {
     media_track_constraits["audio"] = { echoCancellation: true };
