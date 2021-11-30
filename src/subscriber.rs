@@ -560,7 +560,10 @@ impl Subscriber {
                 while result.is_ok() {
                     // use a timeout to make sure we have chance to leave the waiting task even it's closed
                     tokio::select! {
-                        _ = notify_close.notified() => break,
+                        _ = notify_close.notified() => {
+                            info!("notified closed, leaving data channel");
+                            break
+                        },
                         msg = notify_message.recv() => {
                             // we get data before timeout
                             let cmd = match msg {
@@ -624,8 +627,14 @@ impl Subscriber {
                                     }
                                 },
                             }
+
+                            info!("cmd from internal sender handle done");
                         }
                     }
+                }
+
+                if let Err(err) = result {
+                    error!("data channel error: {}", err);
                 }
 
                 info!("leaving data channel loop for '{}'-'{}'", dc_label, dc_id);
@@ -697,6 +706,8 @@ impl Subscriber {
                 }.instrument(span.clone()));
             }
 
+            info!("DataChannel {} message handle done: '{:.20}'", dc_label, msg_str);
+
             Box::pin(async {})
         })
     }
@@ -760,14 +771,21 @@ impl Subscriber {
     }
 
     async fn send_data(dc: Arc<RTCDataChannel>, msg: String) -> Result<usize, webrtc::Error> {
-        dc.send_text(msg).await
+        info!("data channel sending: {}", msg);
+        let result = dc.send_text(msg).await;
+        info!("data channel sent done");
+        result
     }
 
     async fn send_data_renegotiation(dc: Arc<RTCDataChannel>, pc: Arc<RTCPeerConnection>) -> Result<usize, webrtc::Error> {
         let transceiver = pc.get_receivers().await;
         let videos = transceiver.iter().filter(|t| t.kind() == RTPCodecType::Video).count();
         let audios = transceiver.iter().filter(|t| t.kind() == RTPCodecType::Audio).count();
-        dc.send_text(format!("RENEGOTIATION videos {} audios {}", videos, audios)).await
+        let msg = format!("RENEGOTIATION videos {} audios {}", videos, audios);
+        info!("data channel sending: {}", msg);
+        let result = dc.send_text(msg).await;
+        info!("data channel sent done");
+        result
     }
 
     async fn spawn_rtp_foward_task(&self, track: Arc<TrackLocalStaticRTP>, user: &str, mime: &str, app_id: &str) -> Result<()> {
