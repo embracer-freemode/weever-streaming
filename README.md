@@ -211,6 +211,7 @@ WebRTC specs
         + Discontinuous Transmission (DTX) (can reduce the bitrate during silence or background noise)
 * [RFC 7478 - Web Real-Time Communication Use Cases and Requirements](https://datatracker.ietf.org/doc/rfc7478/)
 * [RFC 7587 - RTP Payload Format for the Opus Speech and Audio Codec](https://datatracker.ietf.org/doc/rfc7587/)
+* [RFC 7667 - RTP Topologies](https://datatracker.ietf.org/doc/rfc7667/)
 * [RFC 7741 - RTP Payload Format for VP8 Video](https://datatracker.ietf.org/doc/rfc7741/)
 * [RFC 7742 - WebRTC Video Processing and Codec Requirements](https://datatracker.ietf.org/doc/rfc7742/)
 * [RFC 7874 - WebRTC Audio Codec and Processing Requirements](https://datatracker.ietf.org/doc/rfc7874/)
@@ -612,6 +613,7 @@ Future Works
     - [X] shared state across instances
     - [ ] instance killed will cleanup related resource in Redis
     - [ ] subscriber based scaling mechanism (need to cowork with Helm chart)
+    - [ ] Kubernetes readiness API
 
 * Stability
     - [X] compiler warnings cleanup
@@ -623,14 +625,17 @@ Future Works
     - [ ] unwrap usage cleanup
     - [ ] WebRTC spec reading
     - [ ] more devices test (Windows/MacOS/Linux/Android/iOS with Chrome/Firefox/Safari/Edge)
+    - [ ] test cases
 
 * Performance Optimization
     - [X] (subscriber) don't create transceiver at first hand when publisher is the same as subscriber
     - [X] don't pull streams for subscriber, if the publisher is with same id
+    - [X] enable compiler LTO
     - [ ] use same WebRTC connection for screen share (media add/remove for same publisher)
     - [ ] compile with `RUSTFLAGS="-Z sanitizer=leak"` and test, make sure there is no memory leak
     - [ ] faster showing on subscribers' site when publisher join
     - [ ] WebRTC.rs stack digging
+    - [ ] guarantee connection without extra TURN?
 
 * Monitor
     - [ ] Prometheus endpoint for per room metrics
@@ -640,6 +645,8 @@ Future Works
 * Demo Site
     - [X] select video resolution (e.g. 720p, 240p)
     - [X] publisher can select enable audio/video or not
+    - [X] video resolution setting
+    - [X] video framerate setting
 
 * Misc
     - [X] in-cluster API for publishers list
@@ -666,3 +673,5 @@ Future Works
     - [ ] service internal command list
     - [ ] data channel command list
     - [ ] WebRTC flow explain for publisher/subscriber
+    - [ ] state sharing via Redis
+    - [ ] internal commands via NATS
