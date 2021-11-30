@@ -38,6 +38,11 @@ actix-cors = "0.6.0-beta.4"     # CORS setting (for easier frontend local develo
 rustls = "0.20.2"               # SSL
 rustls-pemfile = "0.2.1"        # SSL
 
+
+[features]
+release_max_level_info = ["log/release_max_level_info", "tracing/release_max_level_info"]
+
+
 [profile.release]
 debug = false
 # Ref: https://doc.rust-lang.org/cargo/reference/profiles.html#lto
