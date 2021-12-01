@@ -29,7 +29,7 @@ tracing = "0.1.29"
 tracing-appender = "0.2.0"
 tracing-log = "0.1.2"
 tracing-subscriber = { version = "0.3.3", features = ["fmt", "env-filter"] }
-console-subscriber = { git = "https://github.com/tokio-rs/console", rev = "042c1f7" }
+console-subscriber = { git = "https://github.com/tokio-rs/console", rev = "042c1f7", optional = true }
 # web server
 actix-web = { version = "4.0.0-beta.12", features = ["rustls"] } # web framework
 actix-web-httpauth = "0.6.0-beta.4"     # bearerer token
@@ -41,6 +41,7 @@ rustls-pemfile = "0.2.1"        # SSL
 
 [features]
 release_max_level_info = ["log/release_max_level_info", "tracing/release_max_level_info"]
+console = ["console-subscriber"]
 
 
 [profile.release]
