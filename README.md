@@ -1,5 +1,5 @@
-Horizontal Scaling WebRTC SFU
-========================================
+Cloud Native, Horizontal Scaling WebRTC SFU
+===========================================
 
 A WebRTC SFU (Selective Forwarding Unit) server aim to be horizontal scalable.
 
@@ -58,6 +58,10 @@ We use single HTTP POST request with SDP offer from client to connect WebRTC.
 Server will provide SDP answer in HTTP response.
 Then following communication will based on the data channel.
 
+This means browser will always be the offer side, server will always be the answer side.
+Even in subscriber case, browser will connect with a single data channel first as offer side.
+Then update the media based on info from data channel.
+
 
 Connection first, renegotiate media later
 -----------------------------------------
@@ -80,6 +84,47 @@ Same user will use a random string as suffix everytime the client connects.
 So the clients are actually all different. No reuse problem.
 
 However, this come with the cost that a subscriber in the room will gradually have bigger SDP when publishers come and go.
+
+
+Data Channel Commands List
+------------------------------
+
+Frontend can use data channel to update SDP.
+So we can use WebRTC renegotiation to get new video/audio.
+
+Data Channel command list:
+
+* server to browser
+    - `PUB_JOIN <ID>`: let frontend know a publisher just join
+    - `PUB_LEFT <ID>`: let frontend know a publisher just left
+    - `RENEGOTIATION videos <N> audios <M>`: ask frontend to do WebRTC renegotiation, frontend should send SDP_OFFER to server
+* browser to server
+    - `SDP_OFFER <SDP>`: update SDP, server will reply SDP_ANSWER
+    - `STOP`: tell server to close WebRTC connection and cleanup related stuffs
+
+
+Room States Sharing
+------------------------------
+
+Current room states are shared across pods via **Redis**.
+So newly created pod can grab the settings from Redis when needed.
+There is no need for other room preparation.
+
+Shared info includes:
+* list of publisher in specific room
+* list of subscriber in specific room
+* per publisher video/audio count
+
+
+Cross Pods Internal Commands
+------------------------------
+
+Internal commands are serialize/deserialize via bincode and send via **NATS**.
+All the commands are collected in an enum called `Command`.
+
+This includes:
+* PubJoin
+* PubLeft
 
 
 
@@ -256,7 +301,14 @@ WebRTC specs
     - There may be multiple "msid" attributes in a single media description. This represents the case where a single MediaStreamTrack is present in multiple MediaStreams.
     - Endpoints can update the associations between RTP streams as expressed by "msid" attributes at any time.
 * [RFC 8831 - WebRTC Data Channels](https://datatracker.ietf.org/doc/rfc8831/)
+    - SCTP over DTLS over UDP
+    - have both Reliable and Unreliable mode
+    - U-C 6: Renegotiation of the configuration of the PeerConnection
+    - WebRTC data channel mechanism does not support SCTP multihoming
+    - in-order or out-of-order
+    - the sender should disable the Nagle algorithm to minimize the latency
 * [RFC 8832 - WebRTC Data Channel Establishment Protocol](https://datatracker.ietf.org/doc/rfc8832/)
+    - DCEP (Data Channel Establishment Protocol)
 * [RFC 8833 - Application-Layer Protocol Negotiation (ALPN) for WebRTC](https://datatracker.ietf.org/doc/rfc8833/)
 * [RFC 8834 - Media Transport and Use of RTP in WebRTC](https://datatracker.ietf.org/doc/rfc8834/)
 * [RFC 8835 - Transports for WebRTC](https://datatracker.ietf.org/doc/rfc8835/)
@@ -546,13 +598,6 @@ When program launches, roughly these steps will happen:
 6. run web server
 
 
-States Sharing
-------------------------------
-
-Curretly, room/publisher/subscriber settings are shared across instances via Redis.
-
-
-
 Extra Learning
 ========================================
 
@@ -636,6 +681,7 @@ Future Works
     - [ ] faster showing on subscribers' site when publisher join
     - [ ] WebRTC.rs stack digging
     - [ ] guarantee connection without extra TURN?
+    - [ ] reduce media count via track cleanup
 
 * Monitor
     - [ ] Prometheus endpoint for per room metrics
@@ -657,6 +703,8 @@ Future Works
     - [ ] split user API and internal setting API
     - [ ] force non-trickle on web
     - [ ] better TURN servers setup for demo site
+    - [ ] `SUB/UNSUB <PUB_ID> <APP_ID>` data channel command
+    - [ ] dynamically add video/audio in existing publisher
 
 * Issues (discover during development or team test)
     - [X] sometime it needs 10 seconds to become connected (network problem?)
@@ -670,8 +718,7 @@ Future Works
     - [ ] redesign the SDP flow
 
 * Docs
-    - [ ] service internal command list
-    - [ ] data channel command list
+    - [X] state sharing via Redis
+    - [X] internal commands via NATS
+    - [X] data channel command list
     - [ ] WebRTC flow explain for publisher/subscriber
-    - [ ] state sharing via Redis
-    - [ ] internal commands via NATS
