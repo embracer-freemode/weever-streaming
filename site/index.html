@@ -156,7 +156,7 @@ window.runPublisher = () => {
     }
   }
 
-  let sendChannel = pub_pc.createDataChannel("control")
+  let sendChannel = pub_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20})
   sendChannel.onclose = () => console.log("sendChannel has closed")
   sendChannel.onopen = () => console.log("sendChannel has opened")
   sendChannel.onmessage = e => {
@@ -256,7 +256,7 @@ window.runPublisher = () => {
           iceServers: window.getIceServers(),
         });
 
-        sendChannelScreen = pub_screen_pc.createDataChannel("control");
+        sendChannelScreen = pub_screen_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20});
 
         let room = document.getElementById("run_pub_room").value;
         let token = document.getElementById("run_pub_token").value;
@@ -381,7 +381,7 @@ window.runSubscriber = () => {
     }
   }
 
-  let sendChannel = sub_pc.createDataChannel("control")
+  let sendChannel = sub_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20})
   sendChannel.onclose = () => console.log("sendChannel has closed")
   sendChannel.onopen = () => console.log("sendChannel has opened")
   sendChannel.onmessage = e => {
