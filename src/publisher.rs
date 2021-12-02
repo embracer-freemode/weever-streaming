@@ -461,11 +461,14 @@ impl PublisherDetails {
 
             let dc = dc.clone();
 
-            let msg_str = String::from_utf8(msg.data.to_vec()).unwrap();
+            let msg_str = String::from_utf8(msg.data.to_vec()).unwrap_or(String::new());
             info!("Message from DataChannel '{}': '{:.20}'", dc_label, msg_str);
 
             if msg_str.starts_with("SDP_OFFER ") {
-                let offer = msg_str.splitn(2, " ").skip(1).next().unwrap();
+                let offer = match msg_str.splitn(2, " ").skip(1).next() {
+                    Some(o) => o,
+                    _ => return Box::pin(async {}),
+                };
                 debug!("got new SDP offer: {}", offer);
                 // build SDP Offer type
                 let mut sdp = RTCSessionDescription::default();
@@ -475,13 +478,27 @@ impl PublisherDetails {
                 return Box::pin(async move {
                     // TODO: dynamic add/remove media handling, and let subscribers know
                     let dc = dc.clone();
-                    pc.set_remote_description(offer).await.unwrap();
+                    if let Err(err) = pc.set_remote_description(offer).await {
+                        error!("SDP_OFFER set error: {}", err);
+                        return;
+                    }
                     info!("updated new SDP offer");
-                    let answer = pc.create_answer(None).await.unwrap();
-                    pc.set_local_description(answer.clone()).await.unwrap();
+                    let answer = match pc.create_answer(None).await {
+                        Ok(answer) => answer,
+                        Err(err) => {
+                            error!("recreate answer error: {}", err);
+                            return;
+                        },
+                    };
+                    if let Err(err) = pc.set_local_description(answer.clone()).await {
+                        error!("set local SDP error: {}", err);
+                        return;
+                    };
                     if let Some(answer) = pc.local_description().await {
                         info!("sent new SDP answer");
-                        dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await.unwrap();
+                        if let Err(err) = dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await {
+                            error!("send SDP_ANSWER to data channel error: {}", err);
+                        };
                     }
                 }.instrument(span.clone()));
             } else if msg_str == "STOP" {

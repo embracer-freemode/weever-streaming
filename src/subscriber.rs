@@ -55,20 +55,6 @@ use std::collections::HashMap;
 use std::pin::Pin;
 
 
-/////////////////////////
-// Weak reference helper
-/////////////////////////
-
-#[derive(Clone)]
-struct WeakPeerConnection(std::sync::Weak<RTCPeerConnection>);
-
-impl WeakPeerConnection {
-    // Try upgrading a weak reference to a strong one
-    fn upgrade(&self) -> Option<Arc<RTCPeerConnection>> {
-        self.0.upgrade()
-    }
-}
-
 //////////////
 // Subscriber
 //////////////
@@ -126,11 +112,6 @@ impl Subscriber {
     // Downgrade the strong reference to a weak reference
     fn downgrade(&self) -> SubscriberWeak {
         SubscriberWeak(Arc::downgrade(&self.0))
-    }
-
-    // Downgrade the strong reference to a weak reference
-    fn pc_downgrade(&self) -> WeakPeerConnection {
-        WeakPeerConnection(Arc::downgrade(&self.pc))
     }
 
     fn get_nats_subect(&self, user: &str, mime: &str, app_id: &str) -> String {
@@ -553,7 +534,7 @@ impl Subscriber {
                 let mut result = {
                     let mut is_doing_renegotiation = is_doing_renegotiation.lock().await;
                     *is_doing_renegotiation = true;
-                    sub.add_transceivers_based_on_room().await.unwrap();
+                    catch(sub.add_transceivers_based_on_room()).await;
                     Self::send_data_renegotiation(dc.clone(), pc.clone()).await
                 };
 
@@ -657,7 +638,7 @@ impl Subscriber {
 
             let dc = dc.clone();
 
-            let msg_str = String::from_utf8(msg.data.to_vec()).unwrap();
+            let msg_str = String::from_utf8(msg.data.to_vec()).unwrap_or(String::new());
             info!("Message from DataChannel '{}': '{:.20}'", dc_label, msg_str);
 
             if msg_str.starts_with("SDP_OFFER ") {
@@ -675,20 +656,36 @@ impl Subscriber {
                 let is_doing_renegotiation = sub.is_doing_renegotiation.clone();
                 return Box::pin(async move {
                     let dc = dc.clone();
-                    pc.set_remote_description(offer).await.unwrap();
+                    if let Err(err) = pc.set_remote_description(offer).await {
+                        error!("SDP_OFFER set error: {}", err);
+                        return;
+                    }
                     info!("updated new SDP offer");
-                    let answer = pc.create_answer(None).await.unwrap();
-                    pc.set_local_description(answer.clone()).await.unwrap();
+                    let answer = match pc.create_answer(None).await {
+                        Ok(answer) => answer,
+                        Err(err) => {
+                            error!("recreate answer error: {}", err);
+                            return;
+                        },
+                    };
+                    if let Err(err) = pc.set_local_description(answer.clone()).await {
+                        error!("set local SDP error: {}", err);
+                        return;
+                    };
                     if let Some(answer) = pc.local_description().await {
                         info!("sent new SDP answer");
-                        dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await.unwrap();
+                        if let Err(err) = dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await {
+                            error!("send SDP_ANSWER to data channel error: {}", err);
+                        };
+                    } else {
+                        error!("somehow didn't get local SDP?!");
                     }
 
                     // check if we have another renegotiation on hold
                     let mut need_another_renegotiation = need_another_renegotiation.lock().await;
                     if *need_another_renegotiation {
                         info!("trigger another round of renegotiation");
-                        sub.add_transceivers_based_on_room().await.unwrap();    // update the transceivers now
+                        catch(sub.add_transceivers_based_on_room()).await;    // update the transceivers now
                         *need_another_renegotiation = false;
                         if let Err(err) = Self::send_data_renegotiation(dc.clone(), pc.clone()).await {
                             error!("trigger another round of renegotiation failed: {:?}", err);
