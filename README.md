@@ -97,9 +97,9 @@ Data Channel command list:
 * server to browser
     - `PUB_JOIN <ID>`: let frontend know a publisher just join
     - `PUB_LEFT <ID>`: let frontend know a publisher just left
-    - `RENEGOTIATION videos <N> audios <M>`: ask frontend to do WebRTC renegotiation, frontend should send SDP_OFFER to server
+    - `SDP_OFFER <SDP>`: new SDP offer, browser should reply SDP_ANSWER
 * browser to server
-    - `SDP_OFFER <SDP>`: update SDP, server will reply SDP_ANSWER
+    - `SDP_ANSWER <SDP>`: new SDP answer, server should then finish current renegotiation
     - `STOP`: tell server to close WebRTC connection and cleanup related stuffs
 
 
@@ -236,6 +236,7 @@ WebRTC specs
         + b=* (zero or more bandwidth information lines)
         + k=* (encryption key)
         + a=* (zero or more media attribute lines)
+* [RFC 5245 - Interactive Connectivity Establishment (ICE): A Protocol for Network Address Translator (NAT) Traversal for Offer/Answer Protocols](https://datatracker.ietf.org/doc/rfc5245/)
 * [RFC 5285 - A General Mechanism for RTP Header Extensions](https://datatracker.ietf.org/doc/rfc5285/)
 * [RFC 6386 - VP8 Data Format and Decoding Guide](https://datatracker.ietf.org/doc/rfc6386/)
 * [RFC 6716 - Definition of the Opus Audio Codec](https://datatracker.ietf.org/doc/rfc6716/)
@@ -676,12 +677,13 @@ Future Works
     - [X] (subscriber) don't create transceiver at first hand when publisher is the same as subscriber
     - [X] don't pull streams for subscriber, if the publisher is with same id
     - [X] enable compiler LTO
+    - [X] faster showing on subscribers' site when publisher join
+    - [X] reduce media count via track cleanup
     - [ ] use same WebRTC connection for screen share (media add/remove for same publisher)
     - [ ] compile with `RUSTFLAGS="-Z sanitizer=leak"` and test, make sure there is no memory leak
-    - [ ] faster showing on subscribers' site when publisher join
     - [ ] WebRTC.rs stack digging
     - [ ] guarantee connection without extra TURN?
-    - [ ] reduce media count via track cleanup
+    - [ ] support select codec & rate from client
 
 * Monitor
     - [ ] Prometheus endpoint for per room metrics
@@ -713,9 +715,9 @@ Future Works
     - [X] publisher rejoin sometime will cause video stucking on subscriber side -> each time publisher join will use an extra random trailing string in the id
 
 * Refactor
+    - [X] redesign the SDP flow
     - [ ] share WebRTC generic part of publisher/subscriber code
     - [ ] redesign the room metadata
-    - [ ] redesign the SDP flow
 
 * Docs
     - [X] state sharing via Redis
