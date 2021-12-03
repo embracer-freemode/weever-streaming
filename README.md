@@ -3,6 +3,9 @@ Cloud Native, Horizontal Scaling WebRTC SFU
 
 A WebRTC SFU (Selective Forwarding Unit) server aim to be horizontal scalable.
 
+This project combine the experience in multiple fields,
+including state-of-the-art WebRTC flow (e.g. multistream, WHIP), Kubernetes deployment, Rust development.
+
 You can view the table of content on GitHub like this:
 ![github-toc](https://user-images.githubusercontent.com/2716047/132623287-c276e4a0-19a8-44a5-bbdb-41e1cdc432e1.gif)
 
@@ -706,7 +709,10 @@ Future Works
     - [ ] force non-trickle on web
     - [ ] better TURN servers setup for demo site
     - [ ] `SUB/UNSUB <PUB_ID> <APP_ID>` data channel command
-    - [ ] dynamically add video/audio in existing publisher
+    - [ ] data channel protocol ("auto", "manual"), "auto" mode means auto subscribe all publishers, "manual" mode means browser choose which to subscribe
+    - [ ] `SUB_MODE <0/1>` switch between "auto"/"manual" mode
+    - [ ] in "manual" mode, server auto push media list when publishers join/leave, so browser can choose
+    - [ ] dynamically add video/audio in existing publisher (`ADD_MEDIA <VIDEO/AUDIO> <APP_ID>` `REMOVE_MEDIA <VIDEO/AUDIO> <APP_ID>`)
 
 * Issues (discover during development or team test)
     - [X] sometime it needs 10 seconds to become connected (network problem?)
