@@ -708,7 +708,7 @@ impl Subscriber {
         }.instrument(tracing::Span::current()));
 
         let _ = self.rtp_forward_tasks.write()
-            .map_err(|e| anyhow!("get tokio_tasks as writer failed: {}", e))?
+            .map_err(|e| anyhow!("get rtp_forward_tasks as writer failed: {}", e))?
             .insert((user.to_string(), app_id.to_string()), task);
 
         Ok(())
