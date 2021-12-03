@@ -4,7 +4,7 @@
 use crate::state::{SharedState, SHARED_STATE, Command};
 use crate::helper::catch;
 use crate::cli;
-use anyhow::{Result, Context, anyhow};
+use anyhow::{Result, Context, anyhow, bail};
 use log::{debug, info, warn, error};
 use webrtc::{
     api::{
@@ -65,10 +65,9 @@ struct SubscriberDetails {
     pc: Arc<RTCPeerConnection>,
     nats: nats::asynk::Connection,
     notify_close: Arc<tokio::sync::Notify>,
-    tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-    user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-    user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
+    rtp_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
     rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
+    rtp_forward_tasks: Arc<RwLock<HashMap<(String, String), JoinHandle<()>>>>,
     notify_sender: RwLock<Option<mpsc::Sender<Command>>>,
     notify_receiver: RwLock<Option<mpsc::Receiver<Command>>>,
     created: std::time::SystemTime,
@@ -219,28 +218,55 @@ impl Subscriber {
         api.new_peer_connection(config).await.map_err(|e| anyhow!(e))
     }
 
-    async fn add_transceivers_based_on_room(&self) -> Result<()> {
-        self._add_transceivers_based_on_room().await
-    }
-
     /// Add transceiver based on room metadata from Redis
-    async fn _add_transceivers_based_on_room(&self) -> Result<()> {
+    async fn update_transceivers_based_on_room(&self) -> Result<()> {
+        // this function should handle follow cases:
+        // case1: add user
+        // case2: remove user
+        // case3: (not cover yet) existing user add media
+        // case4: (not cover yet) existing user remove media
+
         let room = &self.room;
         let sub_user = &self.user;
         let pc = &self.pc;
-        let tracks = &self.tracks;
+        let rtp_tracks = &self.rtp_tracks;
         let rtp_senders = &self.rtp_senders;
-        let user_media_to_tracks = &self.user_media_to_tracks;
-        let user_media_to_senders = &self.user_media_to_senders;
+        let rtp_forward_tasks = &self.rtp_forward_tasks;
         let sub = self;
 
         let media = SHARED_STATE.get_users_media_count(&room).await?;
 
-        let mut video_count = 0;
-        let mut audio_count = 0;
-
         let sub_id = sub_user.splitn(2, '+').take(1).next().unwrap_or("");  // "ID+RANDOM" -> "ID"
 
+        let mut remove_targets = vec![];
+
+        // case2: remove user
+        for ((pub_user, track_id), rtp_sender) in rtp_senders.read().map_err(|e| anyhow!("get rtp_tracks as reader failed: {}", e))?.iter() {
+            let (mime, _count) = track_id.split_at(5);
+            if media.get(&(pub_user.to_string(), mime.to_string())).is_some() {
+                continue
+            }
+            // current (pub_user, mime) pair does not show up in room shared media metadata
+            // pub_user might be left or the media is removed
+            remove_targets.push((pub_user.clone(), track_id.clone(), rtp_sender.clone()));
+        }
+
+        for (pub_user, track_id, rtp_sender) in remove_targets {
+            info!("removing user {} track {}", pub_user, track_id);
+            if let Err(err) = pc.remove_track(&rtp_sender).await {
+                error!("PeerConnection remove_track error: {}", err);
+            }
+            let mut rtp_tracks = rtp_tracks.write().map_err(|e| anyhow!("get rtp_tracks as writer failed: {}", e))?;
+            let mut rtp_senders = rtp_senders.write().map_err(|e| anyhow!("get rtp_senders as writer failed: {}", e))?;
+            let mut rtp_forward_tasks = rtp_forward_tasks.write().map_err(|e| anyhow!("get rtp_forward_tasks as writer failed: {}", e))?;
+            rtp_tracks.remove(&(pub_user.clone(), track_id.clone()));
+            rtp_senders.remove(&(pub_user.clone(), track_id.clone()));
+            if let Some(task) = rtp_forward_tasks.remove(&(pub_user, track_id)) {
+                task.abort();
+            };
+        }
+
+        // case1: add user
         for ((pub_user, raw_mime), count) in media {
             // skip it if publisher is the same as subscriber
             // so we won't pull back our own media streams and cause echo effect
@@ -254,27 +280,11 @@ impl Subscriber {
                 // FIXME: refactor related stuffs
                 let track_id = format!("{}{}", raw_mime, index);
 
-                if tracks.read()
-                         .map_err(|e| anyhow!("get tracks as reader failed: {}", e))?
+                if rtp_tracks.read()
+                         .map_err(|e| anyhow!("get rtp_tracks as reader failed: {}", e))?
                          .contains_key(&(pub_user.clone(), track_id.clone())) {
                     continue;
                 }
-
-                // hardcode this for now
-                // we may need to change this later
-                let app_id = match raw_mime.as_ref() {
-                    "video" => {
-                        let result = format!("video{}", video_count);
-                        video_count += 1;
-                        result
-                    },
-                    "audio" => {
-                        let result = format!("audio{}", audio_count);
-                        audio_count += 1;
-                        result
-                    },
-                    _ => unreachable!(),
-                };
 
                 let mime = match raw_mime.as_ref() {
                     "video" => MIME_TYPE_VP8,
@@ -292,32 +302,18 @@ impl Subscriber {
                     // id is the unique identifier for this Track.
                     // This should be unique for the stream, but doesn’t have to globally unique.
                     // A common example would be 'audio' or 'video' or 'desktop' or 'webcam'
-                    app_id.to_string(),     // msid, application id part
+                    track_id.clone(),     // msid, application id part
                     // stream_id is the group this track belongs too.
                     // This must be unique.
                     pub_user.to_string(),   // msid, group id part
                 ));
 
                 // for later dyanmic RTP dispatch from NATS
-                tracks.write()
-                    .map_err(|e| anyhow!("get tracks as writer failed: {}", e))?
-                    .insert((pub_user.to_string(), track_id.to_string()), track.clone());
-
-                // TODO: cleanup old track
-                user_media_to_tracks.write()
-                    .map_err(|e| anyhow!("get user_media_to_tracks as writer failed: {}", e))?
-                    .entry((pub_user.to_string(), app_id.to_string()))
+                rtp_tracks.write()
+                    .map_err(|e| anyhow!("get rtp_tracks as writer failed: {}", e))?
+                    .entry((pub_user.to_string(), track_id.to_string()))
                     .and_modify(|e| *e = track.clone())
                     .or_insert(track.clone());
-
-                // add tracck to pc
-                // insert rtp sender to cache
-                let pc = Arc::clone(&pc);
-                let pub_user = pub_user.clone();
-                let track_id = track_id.clone();
-                let track = track.clone();
-                let rtp_senders = rtp_senders.clone();
-                let user_media_to_senders = user_media_to_senders.clone();
 
                 // NOTE: make sure the track is added before leaving this function
                 let rtp_sender = pc
@@ -328,10 +324,9 @@ impl Subscriber {
 
                 rtp_senders.write()
                     .map_err(|e| anyhow!("get rtp_senders as writer failed: {}", e))?
-                    .insert((pub_user.clone(), track_id.clone()), rtp_sender.clone());
-                user_media_to_senders.write()
-                    .map_err(|e| anyhow!("get user_media_to_senders as writer failed: {}", e))?
-                    .insert((pub_user.clone(), app_id.to_string()), rtp_sender.clone());
+                    .entry((pub_user.clone(), track_id.clone()))
+                    .and_modify(|e| *e = rtp_sender.clone())
+                    .or_insert(rtp_sender.clone());
 
                 // Read incoming RTCP packets
                 // Before these packets are returned they are processed by interceptors. For things
@@ -386,8 +381,6 @@ impl Subscriber {
         Box::new(move |connection_state: RTCIceConnectionState| {
             let _enter = span.enter();  // populate user & room info in following logs
             info!("ICE Connection State has changed: {}", connection_state);
-            // if connection_state == RTCIceConnectionState::Connected {
-            // }
             Box::pin(async {})
         })
     }
@@ -531,13 +524,14 @@ impl Subscriber {
 
                 // ask for renegotiation immediately after datachannel is connected
                 // TODO: detect if there is media?
-                let mut result = {
+                {
                     let mut is_doing_renegotiation = is_doing_renegotiation.lock().await;
                     *is_doing_renegotiation = true;
-                    catch(sub.add_transceivers_based_on_room()).await;
-                    Self::send_data_renegotiation(dc.clone(), pc.clone()).await
-                };
+                    catch(sub.update_transceivers_based_on_room()).await;
+                    catch(Self::send_data_sdp_offer(dc.clone(), pc.clone())).await;
+                }
 
+                let mut result = Ok(0);
                 while result.is_ok() {
                     // use a timeout to make sure we have chance to leave the waiting task even it's closed
                     tokio::select! {
@@ -556,51 +550,21 @@ impl Subscriber {
                             let msg = cmd.to_user_msg();
 
                             match cmd {
-                                Command::PubJoin(join_user) => {
-                                    let pub_id = join_user.splitn(2, '+').take(1).next().unwrap_or("");  // "ID+RANDOM" -> "ID"
-                                    // don't send PUB_JOIN and RENEGOTIATION if current subscriber is the coming publisher
+                                Command::PubJoin(pub_user) | Command::PubLeft(pub_user) => {
+                                    let pub_id = pub_user.splitn(2, '+').take(1).next().unwrap_or("");  // "ID+RANDOM" -> "ID"
+                                    // don't send PUB_JOIN/PUB_LEFT if current subscriber is the publisher
                                     if pub_id == sub_id {
                                         continue;
                                     }
                                     result = Self::send_data(dc.clone(), msg).await;
-                                    // don't send RENEGOTIATION if we are not done with previous round
+                                    // don't send SDP_OFFER if we are not done with previous round
                                     // it means frotend is still on going another renegotiation
                                     let mut is_doing_renegotiation = is_doing_renegotiation.lock().await;
                                     if !*is_doing_renegotiation {
                                         info!("trigger renegotiation");
                                         *is_doing_renegotiation = true;
-                                        sub.on_pub_join(join_user).await;
-                                        result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
-                                    } else {
-                                        info!("mark as need renegotiation");
-                                        let mut need_another_renegotiation = need_another_renegotiation.lock().await;
-                                        *need_another_renegotiation = true;
-                                    }
-                                },
-                                Command::PubLeft(_user) => {
-                                    // NOTE: we don't delete track for now
-                                    //       when publisher rejoin, we will replace tracks
-
-                                    // let left_user = msg.splitn(2, " ").skip(1).next().unwrap();
-                                    // Self::on_pub_leave(
-                                    //     left_user.to_string(),
-                                    //     room.clone(),
-                                    //     pc.clone(),
-                                    //     media.clone(),
-                                    //     tracks.clone(),
-                                    //     rtp_senders.clone(),
-                                    //     user_media_to_tracks.clone(),
-                                    //     user_media_to_senders.clone(),
-                                    // ).await;
-
-                                    result = Self::send_data(dc.clone(), msg).await;
-                                    // don't send RENEGOTIATION if we are not done with previous round
-                                    // it means frotend is still on going another renegotiation
-                                    let mut is_doing_renegotiation = is_doing_renegotiation.lock().await;
-                                    if !*is_doing_renegotiation {
-                                        info!("trigger renegotiation");
-                                        *is_doing_renegotiation = true;
-                                        result = Self::send_data_renegotiation(dc.clone(), pc.clone()).await;
+                                        catch(sub.update_transceivers_based_on_room()).await;
+                                        catch(Self::send_data_sdp_offer(dc.clone(), pc.clone())).await;
                                     } else {
                                         info!("mark as need renegotiation");
                                         let mut need_another_renegotiation = need_another_renegotiation.lock().await;
@@ -641,55 +605,33 @@ impl Subscriber {
             let msg_str = String::from_utf8(msg.data.to_vec()).unwrap_or(String::new());
             info!("Message from DataChannel '{}': '{:.20}'", dc_label, msg_str);
 
-            if msg_str.starts_with("SDP_OFFER ") {
-                let offer = match msg_str.splitn(2, " ").skip(1).next() {
+            if msg_str.starts_with("SDP_ANSWER ") {
+                let answer = match msg_str.splitn(2, " ").skip(1).next() {
                     Some(o) => o,
                     _ => return Box::pin(async {}),
                 };
-                debug!("got new SDP offer: {}", offer);
+                debug!("got new SDP answer: {}", answer);
                 // build SDP Offer type
                 let mut sdp = RTCSessionDescription::default();
-                sdp.sdp_type = RTCSdpType::Offer;
-                sdp.sdp = offer.to_string();
-                let offer = sdp;
+                sdp.sdp_type = RTCSdpType::Answer;
+                sdp.sdp = answer.to_string();
+                let answer = sdp;
                 let need_another_renegotiation = sub.need_another_renegotiation.clone();
                 let is_doing_renegotiation = sub.is_doing_renegotiation.clone();
                 return Box::pin(async move {
                     let dc = dc.clone();
-                    if let Err(err) = pc.set_remote_description(offer).await {
-                        error!("SDP_OFFER set error: {}", err);
+                    if let Err(err) = pc.set_remote_description(answer).await {
+                        error!("SDP_ANSWER set error: {}", err);
                         return;
                     }
                     info!("updated new SDP offer");
-                    let answer = match pc.create_answer(None).await {
-                        Ok(answer) => answer,
-                        Err(err) => {
-                            error!("recreate answer error: {}", err);
-                            return;
-                        },
-                    };
-                    if let Err(err) = pc.set_local_description(answer.clone()).await {
-                        error!("set local SDP error: {}", err);
-                        return;
-                    };
-                    if let Some(answer) = pc.local_description().await {
-                        info!("sent new SDP answer");
-                        if let Err(err) = dc.send_text(format!("SDP_ANSWER {}", answer.sdp)).await {
-                            error!("send SDP_ANSWER to data channel error: {}", err);
-                        };
-                    } else {
-                        error!("somehow didn't get local SDP?!");
-                    }
-
                     // check if we have another renegotiation on hold
                     let mut need_another_renegotiation = need_another_renegotiation.lock().await;
                     if *need_another_renegotiation {
                         info!("trigger another round of renegotiation");
-                        catch(sub.add_transceivers_based_on_room()).await;    // update the transceivers now
+                        catch(sub.update_transceivers_based_on_room()).await;    // update the transceivers now
                         *need_another_renegotiation = false;
-                        if let Err(err) = Self::send_data_renegotiation(dc.clone(), pc.clone()).await {
-                            error!("trigger another round of renegotiation failed: {:?}", err);
-                        }
+                        catch(Self::send_data_sdp_offer(dc.clone(), pc.clone())).await;
                     } else {
                         info!("mark renegotiation as done");
                         let mut is_doing_renegotiation = is_doing_renegotiation.lock().await;
@@ -709,80 +651,33 @@ impl Subscriber {
         })
     }
 
-    async fn on_pub_join(&self, join_user: String) {
-        info!("pub join: {}", join_user);
-        catch(self._add_transceivers_based_on_room()).await;
-    }
-
-    #[allow(dead_code)]
-    async fn on_pub_leave(
-            left_user: String,
-            _room: String,
-            pc: Arc<RTCPeerConnection>,
-            _media: HashMap<(String, String), String>,
-            tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
-            _user_media_to_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
-            user_media_to_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>) {
-
-        info!("pub leave: {}", left_user);
-
-        // delete old track for PUB_LEFT
-        let mut remove_targets = vec![];
-        for ((pub_user, track_id), _) in tracks.read().unwrap().iter() {
-            if pub_user == &left_user {
-                info!("remove track for {} {}", pub_user, track_id);
-                remove_targets.push((pub_user.to_string(), track_id.to_string()));
-            }
-        }
-        for target in remove_targets {
-            tracks.write().unwrap().remove(&target);
-            // let rtp_sender = {
-            //     let rtp_senders = rtp_senders.read().unwrap();
-            //     rtp_senders.get(&target).unwrap().clone()
-            // };
-            // remove track from subscriber's PeerConnection
-            // pc.remove_track(&rtp_sender).await.unwrap();
-            // rtp_sender.stop().await.unwrap();
-            rtp_senders.write().unwrap().remove(&target);
-            // TODO: make sure RTCP task is killed
-        }
-
-        // TODO: is this truely remove media info from SDP?
-        for transceiver in pc.get_transceivers().await {
-            if let Some(rtp_sender) = transceiver.sender().await {
-                if let Some(track) = rtp_sender.track().await {
-                    if track.stream_id() == left_user {
-                        // this include sender.stop() & receiver.stop() & diection = "inactive"
-                        transceiver.stop().await.unwrap();
-                        // TODO: do we need this?
-                        pc.remove_track(&rtp_sender).await.unwrap();
-                    }
-                }
-            }
-        }
-
-        let mut user_media_to_senders = user_media_to_senders.write().unwrap();
-        user_media_to_senders.remove(&(left_user.clone(), "video0".to_string()));
-        user_media_to_senders.remove(&(left_user.clone(), "audio0".to_string()));
-    }
-
     async fn send_data(dc: Arc<RTCDataChannel>, msg: String) -> Result<usize, webrtc::Error> {
-        info!("data channel sending: {}", msg);
+        info!("data channel sending: {}", &msg);
         let result = dc.send_text(msg).await;
         info!("data channel sent done");
         result
     }
 
-    async fn send_data_renegotiation(dc: Arc<RTCDataChannel>, pc: Arc<RTCPeerConnection>) -> Result<usize, webrtc::Error> {
-        let transceiver = pc.get_receivers().await;
-        let videos = transceiver.iter().filter(|t| t.kind() == RTPCodecType::Video).count();
-        let audios = transceiver.iter().filter(|t| t.kind() == RTPCodecType::Audio).count();
-        let msg = format!("RENEGOTIATION videos {} audios {}", videos, audios);
-        info!("data channel sending: {}", msg);
-        let result = dc.send_text(msg).await;
-        info!("data channel sent done");
-        result
+    async fn send_data_sdp_offer(dc: Arc<RTCDataChannel>, pc: Arc<RTCPeerConnection>) -> Result<()> {
+        info!("making SDP offer");
+        let offer = match pc.create_offer(None).await {
+            Ok(offer) => offer,
+            Err(err) => {
+                bail!("recreate offer error: {}", err);
+            },
+        };
+        if let Err(err) = pc.set_local_description(offer.clone()).await {
+            bail!("set local SDP error: {}", err);
+        };
+        if let Some(offer) = pc.local_description().await {
+            info!("sent new SDP offer");
+            if let Err(err) = dc.send_text(format!("SDP_OFFER {}", offer.sdp)).await {
+                bail!("send SDP_OFFER to data channel error: {}", err);
+            };
+        } else {
+            bail!("somehow didn't get local SDP?!");
+        }
+        Ok(())
     }
 
     async fn spawn_rtp_foward_task(&self, track: Arc<TrackLocalStaticRTP>, user: &str, mime: &str, app_id: &str) -> Result<()> {
@@ -806,16 +701,15 @@ impl Subscriber {
                     } else {
                         error!("track write err: {}", err);
                         // TODO: cleanup?
-                        // std::process::exit(0);
                     }
                 }
             }
             info!("leaving NATS to RTP pull: {}", subject);
         }.instrument(tracing::Span::current()));
 
-        self.tokio_tasks.write()
+        let _ = self.rtp_forward_tasks.write()
             .map_err(|e| anyhow!("get tokio_tasks as writer failed: {}", e))?
-            .push(task);
+            .insert((user.to_string(), app_id.to_string()), task);
 
         Ok(())
     }
@@ -850,10 +744,9 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         nats: nc.clone(),
         pc: peer_connection.clone(),
         notify_close: Default::default(),
-        tracks: Default::default(),
-        user_media_to_tracks: Default::default(),
-        user_media_to_senders: Default::default(),
+        rtp_tracks: Default::default(),
         rtp_senders: Default::default(),
+        rtp_forward_tasks: Default::default(),
         notify_sender: Default::default(),
         notify_receiver: Default::default(),
         created: std::time::SystemTime::now(),
@@ -918,6 +811,12 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
     peer_connection.close().await?;
     subscriber.deregister_notify_message();
     // remove all spawned tasks
+    for task in subscriber.rtp_forward_tasks
+                          .read()
+                          .map_err(|e| anyhow!("get rtp_forward_tasks as reader failed: {}", e))?
+                          .values() {
+        task.abort();
+    }
     for task in subscriber.tokio_tasks
                           .read()
                           .map_err(|e| anyhow!("get tokio_tasks as reader failed: {}", e))?
