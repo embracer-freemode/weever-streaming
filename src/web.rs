@@ -21,6 +21,7 @@ use actix_files::Files;
 use actix_cors::Cors;
 use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
+use prometheus::{Opts, Registry, GaugeVec, TextEncoder};
 
 
 /// Web server for communicating with web clients
@@ -103,6 +104,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .service(subscribe)
                 .service(list_pub)
                 .service(list_sub)
+                .service(metrics)
         })
         .bind_rustls(url, config)?
         .run()
@@ -434,4 +436,26 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
         .reduce(|s, p| s + "," + &p)
         .unwrap_or_default()
         .with_status(StatusCode::OK)
+}
+
+
+/// Prometheus metrics
+#[get("/metrics")]
+async fn metrics() -> impl Responder {
+    let reg = Registry::new();
+
+    // sfu_pod_peer_count
+    let gauge_vec = GaugeVec::new(
+            Opts::new("sfu_pod_peer_count", "publishers and subscribers count in current pod (by room, by type)"),
+            &["room", "type"],
+        ).unwrap();
+    for (name, room) in SHARED_STATE.read().unwrap().rooms.iter() {
+        gauge_vec.with_label_values(&[&name, "pub"]).set(room.pubs.len() as f64);
+        gauge_vec.with_label_values(&[&name, "sub"]).set(room.subs.len() as f64);
+    }
+    reg.register(Box::new(gauge_vec)).unwrap();
+
+    let encoder = TextEncoder::new();
+    let metric_families = reg.gather();
+    encoder.encode_to_string(&metric_families).unwrap()
 }

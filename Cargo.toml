@@ -37,6 +37,8 @@ actix-files = "0.6.0-beta.9"    # static files
 actix-cors = "0.6.0-beta.4"     # CORS setting (for easier frontend local development)
 rustls = "0.20.2"               # SSL
 rustls-pemfile = "0.2.1"        # SSL
+# metrics
+prometheus = "0.13.0"
 
 
 [features]
