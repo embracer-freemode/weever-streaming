@@ -63,7 +63,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     SHARED_STATE.listen_on_commands().await?;
 
     let url = format!("{}:{}", cli.host, cli.port);
-    HttpServer::new(move || {
+    let server1 = HttpServer::new(move || {
             let data = web::Data::new(cli.clone());
             let cors_domain = cli.cors_domain.clone();
             // set CORS for easier frontend development
@@ -104,12 +104,21 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .service(subscribe)
                 .service(list_pub)
                 .service(list_sub)
-                .service(metrics)
         })
         .bind_rustls(url, config)?
-        .run()
-        .await
-        .context("actix web server error")
+        .run();
+
+    let server2 = HttpServer::new(move || {
+            App::new()
+                .wrap(actix_web::middleware::Logger::default())
+                .service(metrics)
+        })
+        .bind("0.0.0.0:9443")?
+        .run();
+
+    let (result1, result2) = tokio::join!(server1, server2);
+    result1.context("actix web public server error")?;
+    result2.context("actix web private server error")
 }
 
 /// Parameters for creating publisher auth token
