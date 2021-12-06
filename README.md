@@ -261,6 +261,28 @@ WebRTC specs
 * [RFC 7478 - Web Real-Time Communication Use Cases and Requirements](https://datatracker.ietf.org/doc/rfc7478/)
 * [RFC 7587 - RTP Payload Format for the Opus Speech and Audio Codec](https://datatracker.ietf.org/doc/rfc7587/)
 * [RFC 7667 - RTP Topologies](https://datatracker.ietf.org/doc/rfc7667/)
+    - AVPF (Audio-Visual Profile with Feedback)
+    - topology: Point-to-Point
+        + minimal issues for feedback messages
+    - topology: Point-to-Point with Translator
+        + SSRC collision detection
+    - topology: Point-to-Point with Relay
+    - topology: Transport Translator
+        + do not modify the RTP stream itself
+    - topology: Media Translator
+    - topology: Back to Back
+    - topology: ASM (Any-Source Multicast)
+    - topology: SSM (Source-Specific Multicast)
+    - topology: SSM-RAMS (Rapid Acquisition of Multicast RTP Sessions)
+    - topology: Mesh
+    - topology: Point-to-Multicast Transport Translator
+    - topology: Mixer
+    - topology: Selective Forwarding Middlebox
+    - topology: Video-switch-MCU
+    - topology: RTCP-terminating-MCU
+    - topology: Split-Terminal
+    - topology: Asymmetric
+    - Topologies can be combined and linked to each other using mixers or translators.  However, care must be taken in handling the SSRC/CSRC space.
 * [RFC 7741 - RTP Payload Format for VP8 Video](https://datatracker.ietf.org/doc/rfc7741/)
 * [RFC 7742 - WebRTC Video Processing and Codec Requirements](https://datatracker.ietf.org/doc/rfc7742/)
 * [RFC 7874 - WebRTC Audio Codec and Processing Requirements](https://datatracker.ietf.org/doc/rfc7874/)
