@@ -61,9 +61,14 @@ We use single HTTP POST request with SDP offer from client to connect WebRTC.
 Server will provide SDP answer in HTTP response.
 Then following communication will based on the data channel.
 
-This means browser will always be the offer side, server will always be the answer side.
+During first setup, browser will be the offer side, server will be the answer side.
 Even in subscriber case, browser will connect with a single data channel first as offer side.
 Then update the media based on info from data channel.
+
+During WebRTC renegotiation for subscribers, server will be the offer side, browser will be the answer side.
+In this case, browser doesn't need too much code, only need to set the SDP received from server.
+Server will use SDP to control browser's transceivers for video/audio.
+And msid reuse will also be handled in this case.
 
 
 Connection first, renegotiate media later
