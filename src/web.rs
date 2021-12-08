@@ -98,10 +98,11 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .wrap(cors)
                 .app_data(data)
                 .service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
-                .service(create_pub)
-                .service(create_sub)
                 .service(publish)
                 .service(subscribe)
+                // TODO: remove following endpoints
+                .service(create_pub)
+                .service(create_sub)
                 .service(list_pub)
                 .service(list_sub)
         })
@@ -115,6 +116,10 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .service(readiness)
                 .service(prestop)
                 .service(metrics)
+                .service(create_pub)
+                .service(create_sub)
+                .service(list_pub)
+                .service(list_sub)
         })
         .bind("0.0.0.0:9443")?
         .run();
