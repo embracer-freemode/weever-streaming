@@ -111,6 +111,9 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     let server2 = HttpServer::new(move || {
             App::new()
                 .wrap(actix_web::middleware::Logger::default())
+                .service(liveness)
+                .service(readiness)
+                .service(prestop)
                 .service(metrics)
         })
         .bind("0.0.0.0:9443")?
@@ -445,6 +448,25 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
         .reduce(|s, p| s + "," + &p)
         .unwrap_or_default()
         .with_status(StatusCode::OK)
+}
+
+
+#[get("/liveness")]
+async fn liveness() -> impl Responder {
+    "OK"
+}
+
+#[get("/readiness")]
+async fn readiness() -> impl Responder {
+    // TODO: do something
+    "OK"
+}
+
+#[get("/preStop")]
+async fn prestop() -> impl Responder {
+    info!("stopping system");
+    // TODO: do something
+    "OK"
 }
 
 
