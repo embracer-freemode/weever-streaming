@@ -5,7 +5,7 @@ use crate::{
     helper::catch,
     state::{SharedState, SHARED_STATE},
 };
-use anyhow::{Result, Context, bail};
+use anyhow::{Result, Context, bail, anyhow};
 use log::{debug, info, error};
 use serde::{Deserialize, Serialize};
 use actix_web::{
@@ -14,7 +14,8 @@ use actix_web::{
     http::{
         StatusCode,
         header,
-    }
+    },
+    dev::ServerHandle,
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use actix_files::Files;
@@ -22,6 +23,11 @@ use actix_cors::Cors;
 use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use prometheus::{Opts, Registry, GaugeVec, TextEncoder};
+use once_cell::sync::OnceCell;
+
+
+pub static PUBLIC_SERVER: OnceCell<ServerHandle> = OnceCell::new();
+pub static PRIVATE_SERVER: OnceCell<ServerHandle> = OnceCell::new();
 
 
 /// Web server for communicating with web clients
@@ -63,7 +69,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     SHARED_STATE.listen_on_commands().await?;
 
     let url = format!("{}:{}", cli.host, cli.port);
-    let server1 = HttpServer::new(move || {
+    let public_server = HttpServer::new(move || {
             let data = web::Data::new(cli.clone());
             let cors_domain = cli.cors_domain.clone();
             // set CORS for easier frontend development
@@ -107,9 +113,11 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .service(list_sub)
         })
         .bind_rustls(url, config)?
+        .system_exit()
+        .shutdown_timeout(10)
         .run();
 
-    let server2 = HttpServer::new(move || {
+    let private_server = HttpServer::new(move || {
             App::new()
                 .wrap(actix_web::middleware::Logger::default())
                 .service(liveness)
@@ -122,9 +130,14 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .service(list_sub)
         })
         .bind("0.0.0.0:9443")?
+        .system_exit()
+        .shutdown_timeout(10)
         .run();
 
-    let (result1, result2) = tokio::join!(server1, server2);
+    PUBLIC_SERVER.set(public_server.handle()).map_err(|_| anyhow!("set public web server handle failed"))?;
+    PRIVATE_SERVER.set(private_server.handle()).map_err(|_| anyhow!("set private web server handle failed"))?;
+
+    let (result1, result2) = tokio::join!(public_server, private_server);
     result1.context("actix web public server error")?;
     result2.context("actix web private server error")
 }
@@ -470,7 +483,24 @@ async fn readiness() -> impl Responder {
 #[get("/preStop")]
 async fn prestop() -> impl Responder {
     info!("stopping system");
-    // TODO: do something
+
+    while SHARED_STATE.has_peers().await {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        info!("still have peers");
+    }
+
+    // stop the servers
+    if let Some(handle) = PUBLIC_SERVER.get() {
+        // spawn task to run the stop, so we won't block current request
+        // (and the stop wait for this request to finish)
+        tokio::spawn(handle.stop(true));
+    }
+    if let Some(handle) = PRIVATE_SERVER.get() {
+        // spawn task to run the stop, so we won't block current request
+        // (and the stop wait for this request to finish)
+        tokio::spawn(handle.stop(true));
+    }
+
     "OK"
 }
 
