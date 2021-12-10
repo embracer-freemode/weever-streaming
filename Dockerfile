@@ -1,4 +1,4 @@
-FROM rust:1.56.0-slim as builder
+FROM rust:1.57.0-slim as builder
 
 # dependencies
 # RUN apt update
@@ -21,7 +21,7 @@ RUN strip target/${TRIPLE}/release/${PROJ}
 
 ##########
 
-FROM debian:bullseye-20211011-slim
+FROM debian:bullseye-20211201-slim
 
 ARG TRIPLE=x86_64-unknown-linux-gnu
 ARG PROJ=webrtc-sfu
