@@ -123,6 +123,9 @@ pub trait SharedState {
     async fn listen_on_commands(&self) -> Result<()>;
     /// forward commands to each subscriber handler
     async fn forward_to_all_subs(&self, room: &str, msg: Command) -> Result<()>;
+
+    /// check if we still have clients
+    async fn has_peers(&self) -> bool;
 }
 
 /// implement cross instances communication for NATS & Redis
@@ -395,5 +398,13 @@ impl SharedState for State {
             }
         }
         Ok(())
+    }
+
+    async fn has_peers(&self) -> bool {
+        let state = match self.read() {
+            Err(_) => return true,
+            Ok(state) => state,
+        };
+        !state.rooms.is_empty()
     }
 }
