@@ -28,6 +28,7 @@ use once_cell::sync::OnceCell;
 
 pub static PUBLIC_SERVER: OnceCell<ServerHandle> = OnceCell::new();
 pub static PRIVATE_SERVER: OnceCell<ServerHandle> = OnceCell::new();
+pub static IS_STOPPING: OnceCell<bool> = OnceCell::new();
 
 
 /// Web server for communicating with web clients
@@ -476,13 +477,18 @@ async fn liveness() -> impl Responder {
 
 #[get("/readiness")]
 async fn readiness() -> impl Responder {
-    // TODO: do something
-    "OK"
+    // TODO: also check if we have too much peers
+    match IS_STOPPING.get() {
+        Some(true) => "BUSY".with_status(StatusCode::SERVICE_UNAVAILABLE),
+        _ => "OK".with_status(StatusCode::OK)
+    }
 }
 
 #[get("/preStop")]
 async fn prestop() -> impl Responder {
     info!("stopping system");
+
+    let _ = IS_STOPPING.set(true);
 
     while SHARED_STATE.has_peers().await {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
