@@ -21,6 +21,7 @@ use actix_files::Files;
 use actix_cors::Cors;
 use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
+use prometheus::{Opts, Registry, GaugeVec, TextEncoder};
 
 
 /// Web server for communicating with web clients
@@ -62,7 +63,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     SHARED_STATE.listen_on_commands().await?;
 
     let url = format!("{}:{}", cli.host, cli.port);
-    HttpServer::new(move || {
+    let server1 = HttpServer::new(move || {
             let data = web::Data::new(cli.clone());
             let cors_domain = cli.cors_domain.clone();
             // set CORS for easier frontend development
@@ -105,9 +106,19 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .service(list_sub)
         })
         .bind_rustls(url, config)?
-        .run()
-        .await
-        .context("actix web server error")
+        .run();
+
+    let server2 = HttpServer::new(move || {
+            App::new()
+                .wrap(actix_web::middleware::Logger::default())
+                .service(metrics)
+        })
+        .bind("0.0.0.0:9443")?
+        .run();
+
+    let (result1, result2) = tokio::join!(server1, server2);
+    result1.context("actix web public server error")?;
+    result2.context("actix web private server error")
 }
 
 /// Parameters for creating publisher auth token
@@ -434,4 +445,29 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
         .reduce(|s, p| s + "," + &p)
         .unwrap_or_default()
         .with_status(StatusCode::OK)
+}
+
+
+/// Prometheus metrics
+#[get("/metrics")]
+async fn metrics() -> impl Responder {
+    let reg = Registry::new();
+
+    // we will pass POD_NAME via Kubernetes setup
+    let pod = std::env::var("POD_NAME").unwrap_or(String::new());
+
+    // sfu_pod_peer_count
+    let gauge_vec = GaugeVec::new(
+            Opts::new("sfu_pod_peer_count", "publishers and subscribers count in current pod (by room, by type)"),
+            &["pod", "room", "type"],
+        ).unwrap();
+    for (name, room) in SHARED_STATE.read().unwrap().rooms.iter() {
+        gauge_vec.with_label_values(&[&pod, &name, "pub"]).set(room.pubs.len() as f64);
+        gauge_vec.with_label_values(&[&pod, &name, "sub"]).set(room.subs.len() as f64);
+    }
+    reg.register(Box::new(gauge_vec)).unwrap();
+
+    let encoder = TextEncoder::new();
+    let metric_families = reg.gather();
+    encoder.encode_to_string(&metric_families).unwrap()
 }

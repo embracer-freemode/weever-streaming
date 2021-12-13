@@ -43,21 +43,20 @@ impl Command {
 /// and per room metadata
 #[derive(Default)]
 pub struct InternalState {
-    rooms: HashMap<String, Room>,
+    pub rooms: HashMap<String, Room>,
     nats: Option<nats::asynk::Connection>,
     redis: Option<MultiplexedConnection>,
 }
 
 /// Room metadata
 #[derive(Debug, Default)]
-struct Room {
-    name: String,
-    subs: HashMap<String, PeerConnetionInfo>,
+pub struct Room {
+    pub subs: HashMap<String, PeerConnetionInfo>,
+    pub pubs: HashSet<String>,  // for local metrics generation
 }
 
 #[derive(Debug, Default)]
-struct PeerConnetionInfo {
-    name: String,
+pub struct PeerConnetionInfo {
     notify_message: Option<Arc<mpsc::Sender<Command>>>,
 }
 
@@ -231,6 +230,12 @@ impl SharedState for State {
         let _: Option<()> = conn.sadd(&redis_key, user).await.context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
         let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+
+        // local state (for metrics)
+        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
+        let room = state.rooms.entry(room.to_string()).or_default();
+        room.pubs.insert(user.to_string());
+
         Ok(())
     }
 
@@ -240,6 +245,17 @@ impl SharedState for State {
         let _: Option<()> = conn.srem(&redis_key, user).await.context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
         let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+
+        // local state (for metrics)
+        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
+        let room_obj = state.rooms.entry(room.to_string()).or_default();
+        room_obj.pubs.remove(user);
+        // if there is no clients for this room
+        // clean up the up layer hashmap too
+        if room_obj.pubs.is_empty() & room_obj.subs.is_empty() {
+            let _ = state.rooms.remove(room);
+        }
+
         Ok(())
     }
 
@@ -303,9 +319,9 @@ impl SharedState for State {
         let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room_obj = state.rooms.entry(room.to_string()).or_default();
         let _ = room_obj.subs.remove(user);
-        // if there is no subscribers for this room
+        // if there is no clients for this room
         // clean up the up layer hashmap too
-        if room_obj.subs.is_empty() {
+        if room_obj.pubs.is_empty() & room_obj.subs.is_empty() {
             let _ = state.rooms.remove(room);
         }
         Ok(())

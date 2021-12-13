@@ -40,7 +40,12 @@ fn main() -> Result<()> {
     // use "console_subscriber::build()"
     // instead of "tracing_subscriber::registry()"
     // for tokio-console
-    let subscriber = tracing_subscriber::registry()
+    #[cfg(not(console))]
+    let subscriber = tracing_subscriber::registry();
+    #[cfg(console)]
+    let subscriber = console_subscriber::build();
+
+    let subscriber = subscriber
         .with(EnvFilter::from_default_env())    // RUST_LOG env filter
         .with(fmt::Layer::new().with_writer(std::io::stdout))
         .with(fmt::Layer::new().with_writer(non_blocking));

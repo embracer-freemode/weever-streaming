@@ -96,6 +96,18 @@ window.createSubscriber = () => {
 room: <input id="run_pub_room" type="text"></input><br/>
 id: <input id="run_pub_id" type="text"></input><br/>
 token: <input id="run_pub_token" type="text"></input><br/>
+enable video: <input type="checkbox" id="run_pub_enable_video" checked><br/>
+enable audio: <input type="checkbox" id="run_pub_enable_audio" checked><br/>
+video resolution: <select id="run_pub_video_resolution">
+    <option value="240">240p</option>
+    <option value="480">480p</option>
+    <option value="720" selected>720p</option>
+    <option value="1080">1080p</option>
+    <option value="1440">1440p</option>
+    <option value="2160">2160p (4K)</option>
+    <option value="4320">4320p (8K)</option>
+</select><br/>
+video framerate: <input type="number" id="run_pub_video_framerate" min="0" max="60" value="30"></br>
 <button id="run_pub_start" onclick="window.runPublisher()">Run Publisher</button>
 <button id="run_pub_stop" hidden>Stop Publisher</button><br/><br/>
 <button id="run_pub_screenshare" hidden> Start Screen Share </button>
@@ -144,7 +156,7 @@ window.runPublisher = () => {
     }
   }
 
-  let sendChannel = pub_pc.createDataChannel("control")
+  let sendChannel = pub_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20})
   sendChannel.onclose = () => console.log("sendChannel has closed")
   sendChannel.onopen = () => console.log("sendChannel has opened")
   sendChannel.onmessage = e => {
@@ -163,7 +175,42 @@ window.runPublisher = () => {
   let id = _id + trailing;
   let _screen_id = _id + "-screen" + trailing;
 
-  navigator.mediaDevices.getUserMedia({ video: true, audio: { echoCancellation: true } })
+  let media_track_constraits = {};
+  if (document.getElementById("run_pub_enable_video").checked) {
+    switch (document.getElementById("run_pub_video_resolution").value) {
+      case "240":
+        media_track_constraits["video"] = { "width": 320, "height": 240 };
+        break;
+      case "480":
+        media_track_constraits["video"] = { "width": 640, "height": 480 };
+        break;
+      case "720":
+        media_track_constraits["video"] = { "width": 1280, "height": 720 };
+        break;
+      case "1080":
+        media_track_constraits["video"] = { "width": 1920, "height": 1080 };
+        break;
+      case "1440":
+        media_track_constraits["video"] = { "width": 2560, "height": 1440 };
+        break;
+      case "2160":
+        media_track_constraits["video"] = { "width": 3840, "height": 2160 };
+        break;
+      case "4320":
+        media_track_constraits["video"] = { "width": 7680, "height": 4320 };
+        break;
+      default:
+        media_track_constraits["video"] = { "width": 1280, "height": 720 };
+    }
+    media_track_constraits["video"]["frameRate"] = document.getElementById("run_pub_video_framerate").value
+  }
+  if (document.getElementById("run_pub_enable_audio").checked) {
+    media_track_constraits["audio"] = { echoCancellation: true };
+  }
+
+  log("media constraints: " + JSON.stringify(media_track_constraits));
+
+  navigator.mediaDevices.getUserMedia(media_track_constraits)
     .then(stream => {
       stream.getTracks().forEach(track => pub_pc.addTrack(track, stream))
       document.getElementById("pub_video").srcObject = stream
@@ -209,7 +256,7 @@ window.runPublisher = () => {
           iceServers: window.getIceServers(),
         });
 
-        sendChannelScreen = pub_screen_pc.createDataChannel("control");
+        sendChannelScreen = pub_screen_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20});
 
         let room = document.getElementById("run_pub_room").value;
         let token = document.getElementById("run_pub_token").value;
@@ -297,23 +344,6 @@ window.runSubscriber = () => {
   // for easier debug and trial only
   window.sub_pc = sub_pc;
 
-  // TODO: is there any API under PeerConnection can do this?
-  class DefaultDict {
-     constructor(defaultInit) {
-        return new Proxy({}, {
-           get: (target, name) => name in target ?
-              target[name] : (target[name] = typeof defaultInit === 'function' ?
-                 new defaultInit().valueOf() :
-                 defaultInit)
-        })
-     }
-  }
-
-  id_to_track_events = new DefaultDict(Array);
-
-  // for easier debug and trial only
-  window.id_to_track_events = id_to_track_events;
-
   sub_pc.oniceconnectionstatechange = e => {
     log(sub_pc.iceConnectionState);
     if (sub_pc.iceConnectionState == "connected") {
@@ -334,7 +364,7 @@ window.runSubscriber = () => {
     }
   }
 
-  let sendChannel = sub_pc.createDataChannel("control")
+  let sendChannel = sub_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20})
   sendChannel.onclose = () => console.log("sendChannel has closed")
   sendChannel.onopen = () => console.log("sendChannel has opened")
   sendChannel.onmessage = e => {
@@ -345,14 +375,7 @@ window.runSubscriber = () => {
     }
 
     if (e.data.startsWith("PUB_JOIN ") == true) {
-      const words = e.data.split(" ");
-      let id = words[1];
-      div = document.getElementById(`media-${id}`)
-      // we don't delete tracks
-      // when publisher rejoin, we will replace track and show it again
-      if (div != null) {
-        div.hidden = false;
-      }
+      // do something
     }
 
     if (e.data.startsWith("PUB_LEFT ") == true) {
@@ -361,75 +384,23 @@ window.runSubscriber = () => {
       div = document.getElementById(`media-${id}`)
       if (div != null) {
         log(`remove media elements for ${id}`);
-        // we don't remove track
-        // we hide it, and reuse it when publisher rejoin
-        div.hidden = true;
+        div.remove()
       }
-      id_to_track_events[id].forEach(event => {
-          console.log(event);
-          // log(`remove track ${event.track.id} kind ${event.track.kind} mid ${event.transceiver.mid}`);
-          // sub_pc.removeTrack(event.transceiver.sender);
-          // event.transceiver.stop();
-      });
-      // delete id_to_track_events[id];
     }
 
-    if (e.data.startsWith("RENEGOTIATION ") == true) {
-      const words = e.data.split(" ");
-      let videos = parseInt(words[2], 10);
-      let audios = parseInt(words[4], 10);
-      log(`all_videos ${videos}`);
-      log(`all_audios ${audios}`);
-
-      let current_videos = 0;
-      let current_audios = 0;
-      for (let transceiver of sub_pc.getTransceivers()) {
-        if (transceiver.stopped == true) {
-            continue;
-        }
-        if (transceiver.receiver.track.kind == "video") {
-          current_videos += 1;
-        } else if (transceiver.receiver.track.kind == "audio") {
-          current_audios += 1;
-        }
-      }
-      log(`current_videos ${current_videos}`);
-      log(`current_audios ${current_audios}`);
-
-      if (videos > current_videos) {
-        // add more video transceivers
-        for (const _ of Array(videos - current_videos).keys()) {
-          sub_pc.addTransceiver("video", {"direction": "recvonly"})
-          log("add video transceiver");
-        }
-      }
-
-      if (audios > current_audios) {
-        // add more audio transceivers
-        for (const _ of Array(audios - current_audios).keys()) {
-          sub_pc.addTransceiver("audio", {"direction": "recvonly"})
-          log("add audio transceiver");
-        }
-      }
-
-      // TODO: remove transceivers?
-      // TODO: better transceivers or tracks update mechanism?
-
-      sub_pc.createOffer()
-        .then(offer => {
-          log("created SDP offer again")
-          sub_pc.setLocalDescription(offer);
-          document.getElementById("subLocalSessionDescription").value = offer.sdp;
-          sendChannel.send("SDP_OFFER " + offer.sdp);
+    if (e.data.startsWith("SDP_OFFER ") == true) {
+      log("set remote SDP offer again")
+      let offer = e.data.slice(10);
+      document.getElementById("subRemoteSessionDescription").value = offer;
+      sub_pc.setRemoteDescription(new RTCSessionDescription({"type":"offer","sdp":offer}));
+      sub_pc.createAnswer()
+        .then(answer => {
+          log("created local SDP answer")
+          sub_pc.setLocalDescription(answer);
+          document.getElementById("subLocalSessionDescription").value = answer.sdp;
+          sendChannel.send("SDP_ANSWER " + answer.sdp);
         })
         .catch(log);
-    }
-
-    if (e.data.startsWith("SDP_ANSWER ") == true) {
-      log("set SDP answer again")
-      let answer = e.data.slice(11);
-      document.getElementById("subRemoteSessionDescription").value = answer;
-      sub_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
     }
   }
 
@@ -454,11 +425,7 @@ window.runSubscriber = () => {
       return;
     }
 
-    // cache it for later cleanup
-    // TODO: is there any API under PeerConnection can do this?
-    // TODO: we can only get the track GUID here? any other API?
     log(`add track ${id} ${event.track.id}`);
-    id_to_track_events[id].push(event);
     console.log(event);                      // TODO: remove this
 
     var div;

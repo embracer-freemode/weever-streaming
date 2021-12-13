@@ -1,7 +1,10 @@
-Horizontal Scaling WebRTC SFU
-========================================
+Cloud Native, Horizontal Scaling WebRTC SFU
+===========================================
 
 A WebRTC SFU (Selective Forwarding Unit) server aim to be horizontal scalable.
+
+This project combine the experience in multiple fields,
+including state-of-the-art WebRTC flow (e.g. multistream, WHIP), Kubernetes deployment, Rust development.
 
 You can view the table of content on GitHub like this:
 ![github-toc](https://user-images.githubusercontent.com/2716047/132623287-c276e4a0-19a8-44a5-bbdb-41e1cdc432e1.gif)
@@ -58,6 +61,15 @@ We use single HTTP POST request with SDP offer from client to connect WebRTC.
 Server will provide SDP answer in HTTP response.
 Then following communication will based on the data channel.
 
+During first setup, browser will be the offer side, server will be the answer side.
+Even in subscriber case, browser will connect with a single data channel first as offer side.
+Then update the media based on info from data channel.
+
+During WebRTC renegotiation for subscribers, server will be the offer side, browser will be the answer side.
+In this case, browser doesn't need too much code, only need to set the SDP received from server.
+Server will use SDP to control browser's transceivers for video/audio.
+And msid reuse will also be handled in this case.
+
 
 Connection first, renegotiate media later
 -----------------------------------------
@@ -80,6 +92,47 @@ Same user will use a random string as suffix everytime the client connects.
 So the clients are actually all different. No reuse problem.
 
 However, this come with the cost that a subscriber in the room will gradually have bigger SDP when publishers come and go.
+
+
+Data Channel Commands List
+------------------------------
+
+Frontend can use data channel to update SDP.
+So we can use WebRTC renegotiation to get new video/audio.
+
+Data Channel command list:
+
+* server to browser
+    - `PUB_JOIN <ID>`: let frontend know a publisher just join
+    - `PUB_LEFT <ID>`: let frontend know a publisher just left
+    - `SDP_OFFER <SDP>`: new SDP offer, browser should reply SDP_ANSWER
+* browser to server
+    - `SDP_ANSWER <SDP>`: new SDP answer, server should then finish current renegotiation
+    - `STOP`: tell server to close WebRTC connection and cleanup related stuffs
+
+
+Room States Sharing
+------------------------------
+
+Current room states are shared across pods via **Redis**.
+So newly created pod can grab the settings from Redis when needed.
+There is no need for other room preparation.
+
+Shared info includes:
+* list of publisher in specific room
+* list of subscriber in specific room
+* per publisher video/audio count
+
+
+Cross Pods Internal Commands
+------------------------------
+
+Internal commands are serialize/deserialize via bincode and send via **NATS**.
+All the commands are collected in an enum called `Command`.
+
+This includes:
+* PubJoin
+* PubLeft
 
 
 
@@ -191,6 +244,7 @@ WebRTC specs
         + b=* (zero or more bandwidth information lines)
         + k=* (encryption key)
         + a=* (zero or more media attribute lines)
+* [RFC 5245 - Interactive Connectivity Establishment (ICE): A Protocol for Network Address Translator (NAT) Traversal for Offer/Answer Protocols](https://datatracker.ietf.org/doc/rfc5245/)
 * [RFC 5285 - A General Mechanism for RTP Header Extensions](https://datatracker.ietf.org/doc/rfc5285/)
 * [RFC 6386 - VP8 Data Format and Decoding Guide](https://datatracker.ietf.org/doc/rfc6386/)
 * [RFC 6716 - Definition of the Opus Audio Codec](https://datatracker.ietf.org/doc/rfc6716/)
@@ -211,6 +265,29 @@ WebRTC specs
         + Discontinuous Transmission (DTX) (can reduce the bitrate during silence or background noise)
 * [RFC 7478 - Web Real-Time Communication Use Cases and Requirements](https://datatracker.ietf.org/doc/rfc7478/)
 * [RFC 7587 - RTP Payload Format for the Opus Speech and Audio Codec](https://datatracker.ietf.org/doc/rfc7587/)
+* [RFC 7667 - RTP Topologies](https://datatracker.ietf.org/doc/rfc7667/)
+    - AVPF (Audio-Visual Profile with Feedback)
+    - topology: Point-to-Point
+        + minimal issues for feedback messages
+    - topology: Point-to-Point with Translator
+        + SSRC collision detection
+    - topology: Point-to-Point with Relay
+    - topology: Transport Translator
+        + do not modify the RTP stream itself
+    - topology: Media Translator
+    - topology: Back to Back
+    - topology: ASM (Any-Source Multicast)
+    - topology: SSM (Source-Specific Multicast)
+    - topology: SSM-RAMS (Rapid Acquisition of Multicast RTP Sessions)
+    - topology: Mesh
+    - topology: Point-to-Multicast Transport Translator
+    - topology: Mixer
+    - topology: Selective Forwarding Middlebox
+    - topology: Video-switch-MCU
+    - topology: RTCP-terminating-MCU
+    - topology: Split-Terminal
+    - topology: Asymmetric
+    - Topologies can be combined and linked to each other using mixers or translators.  However, care must be taken in handling the SSRC/CSRC space.
 * [RFC 7741 - RTP Payload Format for VP8 Video](https://datatracker.ietf.org/doc/rfc7741/)
 * [RFC 7742 - WebRTC Video Processing and Codec Requirements](https://datatracker.ietf.org/doc/rfc7742/)
 * [RFC 7874 - WebRTC Audio Codec and Processing Requirements](https://datatracker.ietf.org/doc/rfc7874/)
@@ -255,7 +332,14 @@ WebRTC specs
     - There may be multiple "msid" attributes in a single media description. This represents the case where a single MediaStreamTrack is present in multiple MediaStreams.
     - Endpoints can update the associations between RTP streams as expressed by "msid" attributes at any time.
 * [RFC 8831 - WebRTC Data Channels](https://datatracker.ietf.org/doc/rfc8831/)
+    - SCTP over DTLS over UDP
+    - have both Reliable and Unreliable mode
+    - U-C 6: Renegotiation of the configuration of the PeerConnection
+    - WebRTC data channel mechanism does not support SCTP multihoming
+    - in-order or out-of-order
+    - the sender should disable the Nagle algorithm to minimize the latency
 * [RFC 8832 - WebRTC Data Channel Establishment Protocol](https://datatracker.ietf.org/doc/rfc8832/)
+    - DCEP (Data Channel Establishment Protocol)
 * [RFC 8833 - Application-Layer Protocol Negotiation (ALPN) for WebRTC](https://datatracker.ietf.org/doc/rfc8833/)
 * [RFC 8834 - Media Transport and Use of RTP in WebRTC](https://datatracker.ietf.org/doc/rfc8834/)
 * [RFC 8835 - Transports for WebRTC](https://datatracker.ietf.org/doc/rfc8835/)
@@ -545,13 +629,6 @@ When program launches, roughly these steps will happen:
 6. run web server
 
 
-States Sharing
-------------------------------
-
-Curretly, room/publisher/subscriber settings are shared across instances via Redis.
-
-
-
 Extra Learning
 ========================================
 
@@ -612,26 +689,42 @@ Future Works
     - [X] shared state across instances
     - [ ] instance killed will cleanup related resource in Redis
     - [ ] subscriber based scaling mechanism (need to cowork with Helm chart)
+    - [ ] Kubernetes readiness API
 
 * Stability
     - [X] compiler warnings cleanup
     - [X] set TTL for all Redis key/value (1 day)
+    - [X] don't send PUB_JOIN to subscriber if publisher is exactly the subscriber
+    - [X] don't send RENEGOTIATION if subscriber is ongoing another renegotiation, hold and send later to avoid frontend state issue
+    - [X] don't change transceivers if subscriber is ongoing renegotiation, hold and change later
     - [ ] make sure all Tokio tasks will end when clients leave
     - [ ] unwrap usage cleanup
     - [ ] WebRTC spec reading
     - [ ] more devices test (Windows/MacOS/Linux/Android/iOS with Chrome/Firefox/Safari/Edge)
+    - [ ] test cases
 
 * Performance Optimization
     - [X] (subscriber) don't create transceiver at first hand when publisher is the same as subscriber
+    - [X] don't pull streams for subscriber, if the publisher is with same id
+    - [X] enable compiler LTO
+    - [X] faster showing on subscribers' site when publisher join
+    - [X] reduce media count via track cleanup
     - [ ] use same WebRTC connection for screen share (media add/remove for same publisher)
-    - [ ] don't pull streams for subscriber, if the publisher is with same id
     - [ ] compile with `RUSTFLAGS="-Z sanitizer=leak"` and test, make sure there is no memory leak
-    - [ ] faster showing on subscribers' site when publisher join
     - [ ] WebRTC.rs stack digging
+    - [ ] guarantee connection without extra TURN?
+    - [ ] support select codec & rate from client
 
 * Monitor
+    - [ ] Prometheus endpoint for per room metrics
     - [ ] use spans info to show on Grafana (by room)
     - [ ] use spans info to show on Grafana (by user)
+
+* Demo Site
+    - [X] select video resolution (e.g. 720p, 240p)
+    - [X] publisher can select enable audio/video or not
+    - [X] video resolution setting
+    - [X] video framerate setting
 
 * Misc
     - [X] in-cluster API for publishers list
@@ -642,6 +735,11 @@ Future Works
     - [ ] split user API and internal setting API
     - [ ] force non-trickle on web
     - [ ] better TURN servers setup for demo site
+    - [ ] `SUB/UNSUB <PUB_ID> <APP_ID>` data channel command
+    - [ ] data channel protocol ("auto", "manual"), "auto" mode means auto subscribe all publishers, "manual" mode means browser choose which to subscribe
+    - [ ] `SUB_MODE <0/1>` switch between "auto"/"manual" mode
+    - [ ] in "manual" mode, server auto push media list when publishers join/leave, so browser can choose
+    - [ ] dynamically add video/audio in existing publisher (`ADD_MEDIA <VIDEO/AUDIO> <APP_ID>` `REMOVE_MEDIA <VIDEO/AUDIO> <APP_ID>`)
 
 * Issues (discover during development or team test)
     - [X] sometime it needs 10 seconds to become connected (network problem?)
@@ -650,6 +748,12 @@ Future Works
     - [X] publisher rejoin sometime will cause video stucking on subscriber side -> each time publisher join will use an extra random trailing string in the id
 
 * Refactor
+    - [X] redesign the SDP flow
     - [ ] share WebRTC generic part of publisher/subscriber code
     - [ ] redesign the room metadata
-    - [ ] redesign the SDP flow
+
+* Docs
+    - [X] state sharing via Redis
+    - [X] internal commands via NATS
+    - [X] data channel command list
+    - [ ] WebRTC flow explain for publisher/subscriber

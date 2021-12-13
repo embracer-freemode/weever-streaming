@@ -16,7 +16,7 @@ RUN mkdir -p .cargo && cargo vendor > .cargo/config
 RUN mkdir src/ && echo "" > src/lib.rs && cargo build --lib --release --target ${TRIPLE} && rm -f src/lib.rs
 # get real code in
 COPY . .
-RUN touch src/lib.rs && cargo build --release --bin ${PROJ} --target ${TRIPLE}
+RUN touch src/lib.rs && cargo build --release --bin ${PROJ} --target ${TRIPLE} --features release_max_level_info
 RUN strip target/${TRIPLE}/release/${PROJ}
 
 ##########
