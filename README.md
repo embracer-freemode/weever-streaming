@@ -687,9 +687,11 @@ Future Works
 
 * Horizontal Scale
     - [X] shared state across instances
+    - [X] Kubernetes readiness API
+    - [X] Kubernetes liveness API
+    - [X] Kubernetes preStop API
     - [ ] instance killed will cleanup related resource in Redis
     - [ ] subscriber based scaling mechanism (need to cowork with Helm chart)
-    - [ ] Kubernetes readiness API
 
 * Stability
     - [X] compiler warnings cleanup
@@ -714,6 +716,7 @@ Future Works
     - [ ] WebRTC.rs stack digging
     - [ ] guarantee connection without extra TURN?
     - [ ] support select codec & rate from client
+    - [ ] trigger initial ICE candidates collection after start, so we won't have first connection delay
 
 * Monitor
     - [ ] Prometheus endpoint for per room metrics
@@ -751,6 +754,11 @@ Future Works
     - [X] redesign the SDP flow
     - [ ] share WebRTC generic part of publisher/subscriber code
     - [ ] redesign the room metadata
+
+* WHIP compatiblity
+    - [X] HTTP POST for SDP offer/answer
+    - [ ] HTTP PATCH
+    - [ ] HTTP DELETE
 
 * Docs
     - [X] state sharing via Redis
