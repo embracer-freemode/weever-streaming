@@ -43,6 +43,7 @@ prometheus = "0.13.0"
 
 [features]
 release_max_level_info = ["log/release_max_level_info", "tracing/release_max_level_info"]
+release_max_level_debug = ["log/release_max_level_debug", "tracing/release_max_level_debug"]
 console = ["console-subscriber"]
 
 
