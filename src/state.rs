@@ -342,7 +342,7 @@ impl SharedState for State {
     }
 
     async fn on_command(&self, room: &str, cmd: &[u8]) -> Result<()> {
-        let cmd: Command = bincode::decode_from_slice(&cmd, Configuration::standard()).context("decode command error")?;
+        let (cmd, _) = bincode::decode_from_slice(&cmd, Configuration::standard()).context("decode command error")?;
         info!("on cmd, room {} msg '{:?}'", room, cmd);
         match cmd {
             Command::PubJoin(_) => {
