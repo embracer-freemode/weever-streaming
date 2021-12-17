@@ -647,7 +647,13 @@ impl Subscriber {
 
             info!("DataChannel {} message handle done: '{:.20}'", dc_label, msg_str);
 
-            Box::pin(async {})
+            // still send something back even if we don't do special things
+            // so browser knows server received the messages
+            Box::pin(async move {
+                if let Err(err) = dc.send_text("OK".to_string()).await {
+                    error!("send OK to data channel error: {}", err);
+                };
+            }.instrument(span.clone()))
         })
     }
 
