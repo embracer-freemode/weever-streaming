@@ -164,7 +164,7 @@ impl Subscriber {
         let mut registry = Registry::new();
 
         // Use the default set of Interceptors
-        registry = register_default_interceptors(registry, &mut m).await?;
+        registry = register_default_interceptors(registry, &mut m)?;
 
         let mut setting = SettingEngine::default();
         setting.set_ice_timeouts(

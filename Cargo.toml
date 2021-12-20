@@ -23,7 +23,7 @@ clap = { version = "3.0.0-rc.7", features = ["derive", "env"] }
 redis = { version = "0.21.4", features = ["tokio-comp"] }
 bincode = "2.0.0-alpha.2"
 # WebRTC
-webrtc = { git = "https://github.com/webrtc-rs/webrtc", rev = "905e0b2" }
+webrtc = { git = "https://github.com/webrtc-rs/webrtc", rev = "fa3b0a1" }
 # tracing ecosystem
 tracing = "0.1.29"
 tracing-appender = "0.2.0"
@@ -31,10 +31,10 @@ tracing-log = "0.1.2"
 tracing-subscriber = { version = "0.3.3", features = ["fmt", "env-filter"] }
 console-subscriber = { version = "0.1.0", optional = true }
 # web server
-actix-web = { version = "4.0.0-beta.14", features = ["rustls"] } # web framework
-actix-web-httpauth = "0.6.0-beta.5"     # bearerer token
+actix-web = { version = "4.0.0-beta.15", features = ["rustls"] } # web framework
+actix-web-httpauth = "0.6.0-beta.6"     # bearerer token
 actix-files = "0.6.0-beta.10"   # static files
-actix-cors = "0.6.0-beta.6"     # CORS setting (for easier frontend local development)
+actix-cors = "0.6.0-beta.7"     # CORS setting (for easier frontend local development)
 rustls = "0.20.2"               # SSL
 rustls-pemfile = "0.2.1"        # SSL
 # metrics

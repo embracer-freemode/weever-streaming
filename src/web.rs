@@ -247,29 +247,29 @@ async fn publish(auth: BearerAuth,
     let (room, id) = path.into_inner();
 
     if id.is_empty() {
-        return "id should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !id.chars().all(|c| c.is_ascii_graphic()) {
-        return "id should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if id.contains('.') {
-        return "id should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if room.is_empty() {
-        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if room.contains('.') {
-        return "room should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -287,8 +287,8 @@ async fn publish(auth: BearerAuth,
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_publisher(&room, &id).await {
-        Ok(true) => return "duplicate publisher".to_string().with_status(StatusCode::BAD_REQUEST),
-        Err(_) => return "publisher check error".to_string().with_status(StatusCode::BAD_REQUEST),
+        Ok(true) => return "duplicate publisher".to_string().customize().with_status(StatusCode::BAD_REQUEST),
+        Err(_) => return "publisher check error".to_string().customize().with_status(StatusCode::BAD_REQUEST),
         _ => {},
     }
 
@@ -296,7 +296,7 @@ async fn publish(auth: BearerAuth,
         Ok(s) => s,
         Err(e) => {
             error!("SDP parsed error: {}", e);
-            return "bad SDP".to_string().with_status(StatusCode::BAD_REQUEST);
+            return "bad SDP".to_string().customize().with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("pub: auth {} sdp {:.20?}", auth.token(), sdp);
@@ -309,7 +309,7 @@ async fn publish(auth: BearerAuth,
         Ok(d) => d,
         Err(e) => {
             error!("system time error: {}", e);
-            return "time error".to_string().with_status(StatusCode::INTERNAL_SERVER_ERROR);
+            return "time error".to_string().customize().with_status(StatusCode::INTERNAL_SERVER_ERROR);
         },
     }.as_micros();
     let tid = now.wrapping_div(10000) as u16;
@@ -320,14 +320,15 @@ async fn publish(auth: BearerAuth,
         Ok(s) => s,
         Err(e) => {
             error!("SDP answer get error: {}", e);
-            return "SDP answer generation error".to_string().with_status(StatusCode::BAD_REQUEST);
+            return "SDP answer generation error".to_string().customize().with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("SDP answer: {:.20}", sdp_answer);
     sdp_answer
+        .customize()
         .with_status(StatusCode::CREATED)       // 201
-        .with_header((header::CONTENT_TYPE, "application/sdp"))
-        .with_header((header::LOCATION, ""))    // TODO: what's the need?
+        .insert_header((header::CONTENT_TYPE, "application/sdp"))
+        .insert_header((header::LOCATION, ""))    // TODO: what's the need?
 }
 
 /// API for running subscriber
@@ -339,29 +340,29 @@ async fn subscribe(auth: BearerAuth,
     let (room, id) = path.into_inner();
 
     if id.is_empty() {
-        return "id should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !id.chars().all(|c| c.is_ascii_graphic()) {
-        return "id should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if id.contains('.') {
-        return "id should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if room.is_empty() {
-        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if room.contains('.') {
-        return "room should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -379,8 +380,8 @@ async fn subscribe(auth: BearerAuth,
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_subscriber(&room, &id).await {
-        Ok(true) => return "duplicate subscriber".to_string().with_status(StatusCode::BAD_REQUEST),
-        Err(_) => return "subscriber check error".to_string().with_status(StatusCode::BAD_REQUEST),
+        Ok(true) => return "duplicate subscriber".to_string().customize().with_status(StatusCode::BAD_REQUEST),
+        Err(_) => return "subscriber check error".to_string().customize().with_status(StatusCode::BAD_REQUEST),
         _ => {},
     }
 
@@ -388,7 +389,7 @@ async fn subscribe(auth: BearerAuth,
         Ok(s) => s,
         Err(e) => {
             error!("SDP parsed error: {}", e);
-            return "bad SDP".to_string().with_status(StatusCode::BAD_REQUEST);
+            return "bad SDP".to_string().customize().with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("sub: auth {} sdp {:.20?}", auth.token(), sdp);
@@ -401,7 +402,7 @@ async fn subscribe(auth: BearerAuth,
         Ok(d) => d,
         Err(e) => {
             error!("system time error: {}", e);
-            return "time error".to_string().with_status(StatusCode::INTERNAL_SERVER_ERROR);
+            return "time error".to_string().customize().with_status(StatusCode::INTERNAL_SERVER_ERROR);
         },
     }.as_micros();
     let tid = now.wrapping_div(10000) as u16;
@@ -412,13 +413,14 @@ async fn subscribe(auth: BearerAuth,
         Ok(s) => s,
         Err(e) => {
             error!("SDP answer get error: {}", e);
-            return "SDP answer generation error".to_string().with_status(StatusCode::BAD_REQUEST);
+            return "SDP answer generation error".to_string().customize().with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("SDP answer: {:.20}", sdp_answer);
     sdp_answer
+        .customize()
         .with_status(StatusCode::CREATED)   // 201
-        .with_header((header::CONTENT_TYPE, "application/sdp"))
+        .insert_header((header::CONTENT_TYPE, "application/sdp"))
 }
 
 /// List publishers in specific room
@@ -427,11 +429,11 @@ async fn list_pub(path: web::Path<String>) -> impl Responder {
     let room = path.into_inner();
 
     if room.is_empty() {
-        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: auth? we check nothing for now
@@ -442,6 +444,7 @@ async fn list_pub(path: web::Path<String>) -> impl Responder {
         .into_iter()
         .reduce(|s, p| s + "," + &p)
         .unwrap_or_default()
+        .customize()
         .with_status(StatusCode::OK)
 }
 
@@ -451,11 +454,11 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
     let room = path.into_inner();
 
     if room.is_empty() {
-        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: auth? we check nothing for now
@@ -466,6 +469,7 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
         .into_iter()
         .reduce(|s, p| s + "," + &p)
         .unwrap_or_default()
+        .customize()
         .with_status(StatusCode::OK)
 }
 
@@ -479,8 +483,8 @@ async fn liveness() -> impl Responder {
 async fn readiness() -> impl Responder {
     // TODO: also check if we have too much peers
     match IS_STOPPING.get() {
-        Some(true) => "BUSY".with_status(StatusCode::SERVICE_UNAVAILABLE),
-        _ => "OK".with_status(StatusCode::OK)
+        Some(true) => "BUSY".customize().with_status(StatusCode::SERVICE_UNAVAILABLE),
+        _ => "OK".customize().with_status(StatusCode::OK)
     }
 }
 
