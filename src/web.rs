@@ -99,19 +99,23 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
                 .allowed_header(header::CONTENT_TYPE);
 
-            App::new()
+            let mut app = App::new()
                 // enable logger
                 .wrap(actix_web::middleware::Logger::default())
                 .wrap(cors)
                 .app_data(data)
-                .service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
                 .service(publish)
-                .service(subscribe)
-                // TODO: remove following endpoints
-                .service(create_pub)
-                .service(create_sub)
-                .service(list_pub)
-                .service(list_sub)
+                .service(subscribe);
+
+            if cli.debug {
+                app = app.service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
+                         .service(create_pub)
+                         .service(create_sub)
+                         .service(list_pub)
+                         .service(list_sub);
+            }
+
+            app
         })
         .bind_rustls(url, config)?
         .system_exit()
