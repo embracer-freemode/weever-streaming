@@ -1,4 +1,6 @@
 <script>
+// some functions for reuse and easier console test
+
 window.getIceServers = () => {
     return [
       {
@@ -6,6 +8,29 @@ window.getIceServers = () => {
       },
       // also TURN servers here
     ];
+}
+
+window.sendSDPOfferHTTP = function(pc, offer, type, room, id, token, answerId, log) {
+  log("send SDP offer via HTTP POST")
+  fetch(`/${type}/${room}/${id}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/sdp",
+      "Authorization": `Bearer ${token}`,
+    },
+    body: offer.sdp,
+  }).then(res => {
+    log(`Request complete! URL ${res.url} status ${res.status}`);
+    res.text().then(function(answer) {
+      document.getElementById(answerId).value = answer;
+      pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
+    })
+  });
+}
+
+window.sendSDPOfferDataChannel = function(dc, offer, log) {
+  log("send SDP offer via Data Channel")
+  dc.send("SDP_OFFER " + offer.sdp);
 }
 </script>
 <h2>Create publisher (per publisher security token setting for pushing streams)</h2>
@@ -112,6 +137,9 @@ video framerate: <input type="number" id="run_pub_video_framerate" min="0" max="
 <button id="run_pub_stop" hidden>Stop Publisher</button><br/><br/>
 <button id="run_pub_screenshare" hidden> Start Screen Share </button>
 <button id="run_pub_screenshare_stop" hidden> Stop Screen Share </button><br />
+<button id="run_pub_ice_restart"> Ice Restart </button><br />
+message: <input id="pub_dc" type="text"></input><br/>
+<button onclick="window.pubSendMessage()">Send Message</button><br /><br />
 <video id="pub_video" width="160" height="120" autoplay muted></video><br />
 <video id="pub_video_screenshare" width="160" height="120" autoplay muted></video><br />
 local offer: <br/><textarea id="pubLocalSessionDescription" readonly="true"></textarea>
@@ -124,20 +152,34 @@ Logs:<br/>
 <div id="run_pub_log"></div>
 <script>
 window.runPublisher = () => {
+  // some buttons toggle
   document.getElementById("run_pub_start").hidden = true;
   document.getElementById("run_pub_stop").hidden = false;
   document.getElementById("run_pub_screenshare").hidden = false;
 
+  // append log to specific div
   let log = msg => {
     document.getElementById("run_pub_log").innerHTML += msg + "<br>"
   }
 
+  // create WebRTC connection object (this only manipulate browser objects, it does not setup the connection yet)
   let pub_pc = new RTCPeerConnection({
     iceServers: window.getIceServers(),
   })
 
+  // for easier debug and trial only
+  window.pub_pc = pub_pc;
+
+  // time profiling
+  let timestamp_create_offer = Date.now();
+
+  // flag to control ICE restart
+  let is_ice_restart = false;
+
+  // ICE connection state change callback
   pub_pc.oniceconnectionstatechange = e => {
     log(pub_pc.iceConnectionState);
+    // show final selected ICE candidate on website
     if (pub_pc.iceConnectionState == "connected") {
       pub_pc.getStats().then(s => {
         s.forEach(o => {
@@ -156,25 +198,82 @@ window.runPublisher = () => {
     }
   }
 
-  let sendChannel = pub_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20})
-  sendChannel.onclose = () => console.log("sendChannel has closed")
-  sendChannel.onopen = () => console.log("sendChannel has opened")
-  sendChannel.onmessage = e => {
-    log(`Message from DataChannel "${sendChannel.label}" payload "${e.data}"`);
+  // trickle ICE candidate calllback
+  pub_pc.onicecandidate = function(event) {
+    if (event.candidate) {
+      // log the candidate without sending to peer
+      // TODO: have a way to send the ICE candidate one by one immediately
+      log("trickle ICE: " + JSON.stringify(event.candidate));
+    } else {
+      // time profiling
+      let timestamp_ice_collected = Date.now();
+      let ice_duration = timestamp_ice_collected - timestamp_create_offer;
+      log(`from createOffer() to full ICE collected: ${ice_duration} ms`);
 
-    if (sendChannel.label != "control") {
+      // all ICE candidates have been collected
+      let offer = pub_pc.localDescription;
+      document.getElementById("pubLocalSessionDescription").value = offer.sdp;
+
+      // get parameters from input
+      let room = document.getElementById("run_pub_room").value;
+      // use a trailing random id to avoid duplication from same publisher
+      let id = document.getElementById("run_pub_id").value + "+" + (+new Date).toString(36);
+      let token = document.getElementById("run_pub_token").value;
+
+      // decide the way we send SDP offer based on ICE restart or not
+      if (is_ice_restart == true) {
+        is_ice_restart = false;
+        // window.sendSDPOfferDataChannel(dataChannel, offer, log);
+        window.sendSDPOfferHTTP(pub_pc, offer, "pub", room, id, token, "pubRemoteSessionDescription", log);
+      } else {
+        window.sendSDPOfferHTTP(pub_pc, offer, "pub", room, id, token, "pubRemoteSessionDescription", log);
+      }
+    }
+  }
+
+  // button for triggering ICE restart
+  document.getElementById("run_pub_ice_restart").onclick = () => {
+    // time profiling
+    timestamp_start = Date.now();
+    timestamp_create_offer = Date.now();
+
+    is_ice_restart = true;
+
+    pub_pc.createOffer({"iceRestart": true})
+      .then(offer => {
+        pub_pc.setLocalDescription(offer);
+        document.getElementById("pubLocalSessionDescription").value = offer.sdp;
+      })
+      .catch(log);
+  }
+
+  // setup a data channel (this only manipulate browser objects, it does not setup the connection yet)
+  let dataChannel = pub_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20})
+  dataChannel.onclose = () => log("DataChannel has closed")
+  dataChannel.onopen = () => log("DataChannel has opened")
+  dataChannel.onmessage = e => {
+    log(`Message from DataChannel "${dataChannel.label}" payload "${e.data}"`);
+
+    if (dataChannel.label != "control") {
         return;
     }
 
     // do something
   }
 
-  let _id = document.getElementById("run_pub_id").value;
-  // use a trailing random id to avoid duplication from same publisher
-  let trailing = "+" + (+new Date).toString(36);
-  let id = _id + trailing;
-  let _screen_id = _id + "-screen" + trailing;
+  // function for sending messages via data channel
+  // will be used by button for testing too
+  window.pubSendMessage = () => {
+    let message = document.getElementById("pub_dc").value
+    if (message === "") {
+      return alert("Message must not be empty")
+    }
 
+    dataChannel.send(message)
+  }
+
+  // media settings
+  // e.g. enable video/audio or not, video resolution, video framerate
   let media_track_constraits = {};
   if (document.getElementById("run_pub_enable_video").checked) {
     switch (document.getElementById("run_pub_video_resolution").value) {
@@ -210,87 +309,71 @@ window.runPublisher = () => {
 
   log("media constraints: " + JSON.stringify(media_track_constraits));
 
+  // get media devices permission based on settings (can have video or audio or both)
   navigator.mediaDevices.getUserMedia(media_track_constraits)
     .then(stream => {
       stream.getTracks().forEach(track => pub_pc.addTrack(track, stream))
+
+      // show video on our own web page
       document.getElementById("pub_video").srcObject = stream
 
-      let room = document.getElementById("run_pub_room").value;
-      let token = document.getElementById("run_pub_token").value;
+      // time profiling
+      timestamp_create_offer = Date.now();
 
       pub_pc.createOffer()
         .then(offer => {
           pub_pc.setLocalDescription(offer);
           document.getElementById("pubLocalSessionDescription").value = offer.sdp;
-          fetch(`/pub/${room}/${id}`, {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${token}`,
-            },
-            body: offer.sdp,
-          }).then(res => {
-            log(`Request complete! URL ${res.url} status ${res.status}`);
-            res.text().then(function(answer) {
-              document.getElementById("pubRemoteSessionDescription").value = answer;
-              pub_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
-            })
-          });
         })
         .catch(log);
     }).catch(log);
 
 
-  // TODO: don't create new PC
+  //////////////////////////////
+  // screen share
+  //////////////////////////////
+
+  // TODO: don't create new PC, use WebRTC renegotiation to add new video stream
   var pub_screen_pc;
-  var sendChannelScreen;
+  var dataChannelScreen;
 
   document.getElementById("run_pub_screenshare").onclick = () => {
-
+    // some buttons toggle
     document.getElementById("run_pub_screenshare").hidden = true;
     document.getElementById("run_pub_screenshare_stop").hidden = false;
 
+    // get media devices permission based on settings
     navigator.mediaDevices.getDisplayMedia({video: true})
       .then(stream => {
 
+        // create WebRTC connection object (this only manipulate browser objects, it does not setup the connection yet)
         pub_screen_pc = new RTCPeerConnection({
           iceServers: window.getIceServers(),
         });
 
-        sendChannelScreen = pub_screen_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20});
-
-        let room = document.getElementById("run_pub_room").value;
-        let token = document.getElementById("run_pub_token").value;
+        // setup a data channel (this only manipulate browser objects, it does not setup the connection yet)
+        dataChannelScreen = pub_screen_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20});
 
         stream.getTracks().forEach(track => pub_screen_pc.addTrack(track, stream));
         document.getElementById("pub_video_screenshare").srcObject = stream;
 
-        let screen_id = _screen_id + (+new Date).toString(36);
+        let room = document.getElementById("run_pub_room").value;
+        let token = document.getElementById("run_pub_token").value;
+        let _id = document.getElementById("run_pub_id").value;
+        let screen_id = _id + "-screen" + "+" + (+new Date).toString(36);
 
         pub_screen_pc.createOffer()
           .then(offer => {
             pub_screen_pc.setLocalDescription(offer);
-            fetch(`/pub/${room}/${screen_id}`, {
-              method: "POST",
-              headers: {
-                "Authorization": `Bearer ${token}`,
-              },
-              body: offer.sdp,
-            }).then(res => {
-              log(`Request complete! URL ${res.url} status ${res.status}`);
-              res.text().then(function(answer) {
-                document.getElementById("pubRemoteSessionDescription").value = answer;
-                pub_screen_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
-              })
-            });
+            window.sendSDPOfferHTTP(pub_screen_pc, offer, "pub", room, screen_id, token, "pubRemoteSessionDescription", log);
           })
           .catch(log);
-
-        // TODO: use renegotiation instead of new PC
       }).catch(log);
   }
 
+  // button for stopping the WebRTC connection
   document.getElementById("run_pub_stop").onclick = () => {
-    sendChannel.send("STOP");
+    dataChannel.send("STOP");
     document.getElementById("run_pub_start").hidden = false;
     document.getElementById("run_pub_stop").hidden = true;
     document.getElementById("run_pub_screenshare").hidden = true;
@@ -298,8 +381,9 @@ window.runPublisher = () => {
     pub_pc.close();
   }
 
+  // button for stopping the screen share
   document.getElementById("run_pub_screenshare_stop").onclick = () => {
-    sendChannelScreen.send("STOP");
+    dataChannelScreen.send("STOP");
     document.getElementById("run_pub_screenshare").hidden = false;
     document.getElementById("run_pub_screenshare_stop").hidden = true;
     document.getElementById("pub_video_screenshare").srcObject = null;
@@ -321,6 +405,7 @@ selected local candidate: <div id="run_sub_local_ice"></div>
 selected remote candidate: <div id="run_sub_remote_ice"></div>
 <button id="run_sub_start" onclick="window.runSubscriber()"> Start Session </button>
 <button id="run_sub_stop" hidden>Stop Session</button><br/><br/>
+<button id="run_sub_ice_restart"> Ice Restart </button><br />
 <br/>
 Video<br/>
 <div id="sub_videos"></div><br/><br />
@@ -330,13 +415,22 @@ Logs<br/>
 <div id="sub_log"></div>
 <script>
 window.runSubscriber = () => {
+  // some buttons toggle
   document.getElementById("run_sub_start").hidden = true;
   document.getElementById("run_sub_stop").hidden = false;
 
+  // append log to specific div
   let log = msg => {
     document.getElementById("sub_log").innerHTML += msg + "<br>"
   };
 
+  // time profiling
+  let timestamp_start = Date.now();
+
+  // flag to control ICE restart
+  let is_ice_restart = false;
+
+  // create WebRTC connection object (this only manipulate browser objects, it does not setup the connection yet)
   let sub_pc = new RTCPeerConnection({
     iceServers: window.getIceServers(),
   });
@@ -344,9 +438,16 @@ window.runSubscriber = () => {
   // for easier debug and trial only
   window.sub_pc = sub_pc;
 
+  // ICE connection state change callback
   sub_pc.oniceconnectionstatechange = e => {
     log(sub_pc.iceConnectionState);
+    // show final selected ICE candidate on website
     if (sub_pc.iceConnectionState == "connected") {
+      // time profiling
+      let timestamp_connected = Date.now();
+      let connect_duration = timestamp_connected - timestamp_start;
+      log(`from start to connected: ${connect_duration} ms`);
+
       sub_pc.getStats().then(s => {
         s.forEach(o => {
           // chrome
@@ -364,13 +465,47 @@ window.runSubscriber = () => {
     }
   }
 
-  let sendChannel = sub_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20})
-  sendChannel.onclose = () => console.log("sendChannel has closed")
-  sendChannel.onopen = () => console.log("sendChannel has opened")
-  sendChannel.onmessage = e => {
-    log(`Message from DataChannel "${sendChannel.label}" payload "${e.data}"`);
+  // ICE connection state change callback
+  sub_pc.onicecandidate = function(event) {
+    if (event.candidate) {
+      // log the candidate without sending to peer
+      // TODO: have a way to send the ICE candidate one by one immediately
+      log("trickle ICE: " + JSON.stringify(event.candidate));
+    } else {
+      // time profiling
+      let timestamp_ice_collected = Date.now();
+      let ice_duration = timestamp_ice_collected - timestamp_create_offer;
+      log(`from createOffer() to full ICE collected: ${ice_duration} ms`);
 
-    if (sendChannel.label != "control") {
+      // all ICE candidates have been collected
+      let offer = sub_pc.localDescription;
+      document.getElementById("subLocalSessionDescription").value = offer.sdp;
+
+      // get parameters from input
+      let room = document.getElementById("run_sub_room").value;
+      // use a trailing random id to avoid duplication from same publisher
+      let id = document.getElementById("run_sub_id").value + "+" + (+new Date).toString(36);
+      let token = document.getElementById("run_sub_token").value;
+
+      // decide the way we send SDP offer based on ICE restart or not
+      if (is_ice_restart == true) {
+        is_ice_restart = false;
+        // window.sendSDPOfferDataChannel(dataChannel, offer, log);
+        window.sendSDPOfferHTTP(sub_pc, offer, "sub", room, id, token, "subRemoteSessionDescription", log);
+      } else {
+        window.sendSDPOfferHTTP(sub_pc, offer, "sub", room, id, token, "subRemoteSessionDescription", log);
+      }
+    }
+  }
+
+  // setup a data channel (this only manipulate browser objects, it does not setup the connection yet)
+  let dataChannel = sub_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20})
+  dataChannel.onclose = () => console.log("dataChannel has closed")
+  dataChannel.onopen = () => console.log("dataChannel has opened")
+  dataChannel.onmessage = e => {
+    log(`Message from DataChannel "${dataChannel.label}" payload "${e.data}"`);
+
+    if (dataChannel.label != "control") {
         return;
     }
 
@@ -398,21 +533,41 @@ window.runSubscriber = () => {
           log("created local SDP answer")
           sub_pc.setLocalDescription(answer);
           document.getElementById("subLocalSessionDescription").value = answer.sdp;
-          sendChannel.send("SDP_ANSWER " + answer.sdp);
+          dataChannel.send("SDP_ANSWER " + answer.sdp);
         })
         .catch(log);
     }
   }
 
+  // button for triggering ICE restart
+  document.getElementById("run_sub_ice_restart").onclick = () => {
+    // time profiling
+    timestamp_start = Date.now();
+    timestamp_create_offer = Date.now();
+
+    is_ice_restart = true
+
+    sub_pc.createOffer({"iceRestart": true})
+      .then(offer => {
+        sub_pc.setLocalDescription(offer);
+        document.getElementById("subLocalSessionDescription").value = offer.sdp;
+      })
+      .catch(log);
+  }
+
+  // function for sending messages via data channel
+  // will be used by button for testing too
   window.subSendMessage = () => {
     let message = document.getElementById("sub_dc").value
     if (message === "") {
       return alert("Message must not be empty")
     }
 
-    sendChannel.send(message)
+    dataChannel.send(message)
   }
 
+  // new media track callback
+  // we will also get user id from the stream id (embedded in SDP by design)
   sub_pc.ontrack = function (event) {
     if (event.streams == null) {
       return;
@@ -451,35 +606,20 @@ window.runSubscriber = () => {
     media.controls = true
   }
 
+  // time profiling
+  let timestamp_create_offer = Date.now();
+
+  // create first SDP offer
   sub_pc.createOffer()
     .then(offer => {
       sub_pc.setLocalDescription(offer);
       document.getElementById("subLocalSessionDescription").value = offer.sdp;
-
-      let room = document.getElementById("run_sub_room").value;
-      // use a trailing random id to avoid duplication from same publisher
-      let id = document.getElementById("run_sub_id").value + "+" + (+new Date).toString(36);
-      let token = document.getElementById("run_sub_token").value;
-
-      fetch(`/sub/${room}/${id}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/sdp",
-          "Authorization": `Bearer ${token}`,
-        },
-        body: offer.sdp,
-      }).then(res => {
-        log(`Request complete! URL ${res.url} status ${res.status}`);
-        res.text().then(function(answer) {
-          document.getElementById("subRemoteSessionDescription").value = answer;
-          sub_pc.setRemoteDescription(new RTCSessionDescription({"type":"answer","sdp":answer}));
-        })
-      });
     })
     .catch(log);
 
+  // button for stopping the WebRTC connection
   document.getElementById("run_sub_stop").onclick = () => {
-    sendChannel.send("STOP");
+    dataChannel.send("STOP");
     document.getElementById("run_sub_start").hidden = false;
     document.getElementById("run_sub_stop").hidden = true;
     document.getElementById("sub_videos").textContent = '';

@@ -1,4 +1,4 @@
-FROM rust:1.56.0-slim as builder
+FROM rust:1.57.0-slim as builder
 
 # dependencies
 # RUN apt update
@@ -16,12 +16,12 @@ RUN mkdir -p .cargo && cargo vendor > .cargo/config
 RUN mkdir src/ && echo "" > src/lib.rs && cargo build --lib --release --target ${TRIPLE} && rm -f src/lib.rs
 # get real code in
 COPY . .
-RUN touch src/lib.rs && cargo build --release --bin ${PROJ} --target ${TRIPLE} --features release_max_level_info
+RUN touch src/lib.rs && cargo build --release --bin ${PROJ} --target ${TRIPLE} --features release_max_level_debug
 RUN strip target/${TRIPLE}/release/${PROJ}
 
 ##########
 
-FROM debian:bullseye-20211011-slim
+FROM debian:bullseye-20211201-slim
 
 ARG TRIPLE=x86_64-unknown-linux-gnu
 ARG PROJ=webrtc-sfu

@@ -139,7 +139,7 @@ impl PublisherDetails {
         let mut registry = Registry::new();
 
         // Use the default set of Interceptors
-        registry = register_default_interceptors(registry, &mut m).await?;
+        registry = register_default_interceptors(registry, &mut m)?;
 
         let mut setting = SettingEngine::default();
         setting.set_ice_timeouts(
@@ -508,7 +508,13 @@ impl PublisherDetails {
                 }.instrument(span.clone()));
             }
 
-            Box::pin(async {})
+            // still send something back even if we don't do special things
+            // so browser knows server received the messages
+            Box::pin(async move {
+                if let Err(err) = dc.send_text("OK".to_string()).await {
+                    error!("send OK to data channel error: {}", err);
+                };
+            }.instrument(span.clone()))
         })
     }
 

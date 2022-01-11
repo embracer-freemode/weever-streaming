@@ -123,6 +123,9 @@ pub trait SharedState {
     async fn listen_on_commands(&self) -> Result<()>;
     /// forward commands to each subscriber handler
     async fn forward_to_all_subs(&self, room: &str, msg: Command) -> Result<()>;
+
+    /// check if we still have clients
+    async fn has_peers(&self) -> bool;
 }
 
 /// implement cross instances communication for NATS & Redis
@@ -339,7 +342,7 @@ impl SharedState for State {
     }
 
     async fn on_command(&self, room: &str, cmd: &[u8]) -> Result<()> {
-        let cmd: Command = bincode::decode_from_slice(&cmd, Configuration::standard()).context("decode command error")?;
+        let (cmd, _) = bincode::decode_from_slice(&cmd, Configuration::standard()).context("decode command error")?;
         info!("on cmd, room {} msg '{:?}'", room, cmd);
         match cmd {
             Command::PubJoin(_) => {
@@ -395,5 +398,13 @@ impl SharedState for State {
             }
         }
         Ok(())
+    }
+
+    async fn has_peers(&self) -> bool {
+        let state = match self.read() {
+            Err(_) => return true,
+            Ok(state) => state,
+        };
+        !state.rooms.is_empty()
     }
 }

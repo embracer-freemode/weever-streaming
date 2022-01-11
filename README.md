@@ -136,6 +136,29 @@ This includes:
 
 
 
+Compare to other SFUs
+========================================
+
+Advantage
+------------------------------
+
+* WebRTC connection setup flow is simple (HTTP POST)
+* horizontal scalable
+* consider Kubernetes deploy from day one
+* single binary for deployment, not complex components setup
+
+
+Disadvantage
+------------------------------
+
+* only support VP8 and Opus right now
+* no audio mixing
+* does not support bandwidth estimation yet
+* does not support Simulcast or SVC yet (can combine with bandwidth estimation for dynamically switching)
+* no admin page
+
+
+
 WebRTC specs
 ========================================
 
@@ -687,9 +710,10 @@ Future Works
 
 * Horizontal Scale
     - [X] shared state across instances
+    - [X] Kubernetes readiness API
+    - [X] Kubernetes liveness API
+    - [X] Kubernetes preStop API
     - [ ] instance killed will cleanup related resource in Redis
-    - [ ] subscriber based scaling mechanism (need to cowork with Helm chart)
-    - [ ] Kubernetes readiness API
 
 * Stability
     - [X] compiler warnings cleanup
@@ -714,9 +738,12 @@ Future Works
     - [ ] WebRTC.rs stack digging
     - [ ] guarantee connection without extra TURN?
     - [ ] support select codec & rate from client
+    - [ ] trigger initial ICE candidates collection after start, so we won't have first connection delay
 
 * Monitor
-    - [ ] Prometheus endpoint for per room metrics
+    - [X] Prometheus endpoint for per room publisher/subscriber metrics
+    - [X] Grafana dashboard for per room publisher/subscriber
+    - [ ] per room video/audio count metrics
     - [ ] use spans info to show on Grafana (by room)
     - [ ] use spans info to show on Grafana (by user)
 
@@ -732,7 +759,7 @@ Future Works
     - [X] assign public IP from outside to show on the ICE (via set_nat_1to1_ips)
     - [X] show selected ICE candidate on demo site
     - [X] CORS setting
-    - [ ] split user API and internal setting API
+    - [X] split user API and internal setting API
     - [ ] force non-trickle on web
     - [ ] better TURN servers setup for demo site
     - [ ] `SUB/UNSUB <PUB_ID> <APP_ID>` data channel command
@@ -751,6 +778,11 @@ Future Works
     - [X] redesign the SDP flow
     - [ ] share WebRTC generic part of publisher/subscriber code
     - [ ] redesign the room metadata
+
+* WHIP compatiblity
+    - [X] HTTP POST for SDP offer/answer
+    - [ ] HTTP PATCH
+    - [ ] HTTP DELETE
 
 * Docs
     - [X] state sharing via Redis

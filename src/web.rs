@@ -5,7 +5,7 @@ use crate::{
     helper::catch,
     state::{SharedState, SHARED_STATE},
 };
-use anyhow::{Result, Context, bail};
+use anyhow::{Result, Context, bail, anyhow};
 use log::{debug, info, error};
 use serde::{Deserialize, Serialize};
 use actix_web::{
@@ -14,7 +14,8 @@ use actix_web::{
     http::{
         StatusCode,
         header,
-    }
+    },
+    dev::ServerHandle,
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
 use actix_files::Files;
@@ -22,6 +23,12 @@ use actix_cors::Cors;
 use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use prometheus::{Opts, Registry, GaugeVec, TextEncoder};
+use once_cell::sync::OnceCell;
+
+
+pub static PUBLIC_SERVER: OnceCell<ServerHandle> = OnceCell::new();
+pub static PRIVATE_SERVER: OnceCell<ServerHandle> = OnceCell::new();
+pub static IS_STOPPING: OnceCell<bool> = OnceCell::new();
 
 
 /// Web server for communicating with web clients
@@ -63,7 +70,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     SHARED_STATE.listen_on_commands().await?;
 
     let url = format!("{}:{}", cli.host, cli.port);
-    let server1 = HttpServer::new(move || {
+    let public_server = HttpServer::new(move || {
             let data = web::Data::new(cli.clone());
             let cors_domain = cli.cors_domain.clone();
             // set CORS for easier frontend development
@@ -92,31 +99,50 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
                 .allowed_header(header::CONTENT_TYPE);
 
-            App::new()
+            let mut app = App::new()
                 // enable logger
                 .wrap(actix_web::middleware::Logger::default())
                 .wrap(cors)
                 .app_data(data)
-                .service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
+                .service(publish)
+                .service(subscribe);
+
+            if cli.debug {
+                app = app.service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
+                         .service(create_pub)
+                         .service(create_sub)
+                         .service(list_pub)
+                         .service(list_sub);
+            }
+
+            app
+        })
+        .bind_rustls(url, config)?
+        .system_exit()
+        .shutdown_timeout(10)
+        .run();
+
+    let private_server = HttpServer::new(move || {
+            App::new()
+                .wrap(actix_web::middleware::Logger::default())
+                .service(liveness)
+                .service(readiness)
+                .service(prestop)
+                .service(metrics)
                 .service(create_pub)
                 .service(create_sub)
-                .service(publish)
-                .service(subscribe)
                 .service(list_pub)
                 .service(list_sub)
         })
-        .bind_rustls(url, config)?
-        .run();
-
-    let server2 = HttpServer::new(move || {
-            App::new()
-                .wrap(actix_web::middleware::Logger::default())
-                .service(metrics)
-        })
         .bind("0.0.0.0:9443")?
+        .system_exit()
+        .shutdown_timeout(10)
         .run();
 
-    let (result1, result2) = tokio::join!(server1, server2);
+    PUBLIC_SERVER.set(public_server.handle()).map_err(|_| anyhow!("set public web server handle failed"))?;
+    PRIVATE_SERVER.set(private_server.handle()).map_err(|_| anyhow!("set private web server handle failed"))?;
+
+    let (result1, result2) = tokio::join!(public_server, private_server);
     result1.context("actix web public server error")?;
     result2.context("actix web private server error")
 }
@@ -225,29 +251,29 @@ async fn publish(auth: BearerAuth,
     let (room, id) = path.into_inner();
 
     if id.is_empty() {
-        return "id should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !id.chars().all(|c| c.is_ascii_graphic()) {
-        return "id should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if id.contains('.') {
-        return "id should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if room.is_empty() {
-        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if room.contains('.') {
-        return "room should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -265,8 +291,8 @@ async fn publish(auth: BearerAuth,
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_publisher(&room, &id).await {
-        Ok(true) => return "duplicate publisher".to_string().with_status(StatusCode::BAD_REQUEST),
-        Err(_) => return "publisher check error".to_string().with_status(StatusCode::BAD_REQUEST),
+        Ok(true) => return "duplicate publisher".to_string().customize().with_status(StatusCode::BAD_REQUEST),
+        Err(_) => return "publisher check error".to_string().customize().with_status(StatusCode::BAD_REQUEST),
         _ => {},
     }
 
@@ -274,7 +300,7 @@ async fn publish(auth: BearerAuth,
         Ok(s) => s,
         Err(e) => {
             error!("SDP parsed error: {}", e);
-            return "bad SDP".to_string().with_status(StatusCode::BAD_REQUEST);
+            return "bad SDP".to_string().customize().with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("pub: auth {} sdp {:.20?}", auth.token(), sdp);
@@ -287,7 +313,7 @@ async fn publish(auth: BearerAuth,
         Ok(d) => d,
         Err(e) => {
             error!("system time error: {}", e);
-            return "time error".to_string().with_status(StatusCode::INTERNAL_SERVER_ERROR);
+            return "time error".to_string().customize().with_status(StatusCode::INTERNAL_SERVER_ERROR);
         },
     }.as_micros();
     let tid = now.wrapping_div(10000) as u16;
@@ -298,14 +324,15 @@ async fn publish(auth: BearerAuth,
         Ok(s) => s,
         Err(e) => {
             error!("SDP answer get error: {}", e);
-            return "SDP answer generation error".to_string().with_status(StatusCode::BAD_REQUEST);
+            return "SDP answer generation error".to_string().customize().with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("SDP answer: {:.20}", sdp_answer);
     sdp_answer
+        .customize()
         .with_status(StatusCode::CREATED)       // 201
-        .with_header((header::CONTENT_TYPE, "application/sdp"))
-        .with_header((header::LOCATION, ""))    // TODO: what's the need?
+        .insert_header((header::CONTENT_TYPE, "application/sdp"))
+        .insert_header((header::LOCATION, ""))    // TODO: what's the need?
 }
 
 /// API for running subscriber
@@ -317,29 +344,29 @@ async fn subscribe(auth: BearerAuth,
     let (room, id) = path.into_inner();
 
     if id.is_empty() {
-        return "id should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !id.chars().all(|c| c.is_ascii_graphic()) {
-        return "id should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if id.contains('.') {
-        return "id should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "id should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if room.is_empty() {
-        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if room.contains('.') {
-        return "room should not contain '.'".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -357,8 +384,8 @@ async fn subscribe(auth: BearerAuth,
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_subscriber(&room, &id).await {
-        Ok(true) => return "duplicate subscriber".to_string().with_status(StatusCode::BAD_REQUEST),
-        Err(_) => return "subscriber check error".to_string().with_status(StatusCode::BAD_REQUEST),
+        Ok(true) => return "duplicate subscriber".to_string().customize().with_status(StatusCode::BAD_REQUEST),
+        Err(_) => return "subscriber check error".to_string().customize().with_status(StatusCode::BAD_REQUEST),
         _ => {},
     }
 
@@ -366,7 +393,7 @@ async fn subscribe(auth: BearerAuth,
         Ok(s) => s,
         Err(e) => {
             error!("SDP parsed error: {}", e);
-            return "bad SDP".to_string().with_status(StatusCode::BAD_REQUEST);
+            return "bad SDP".to_string().customize().with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("sub: auth {} sdp {:.20?}", auth.token(), sdp);
@@ -379,7 +406,7 @@ async fn subscribe(auth: BearerAuth,
         Ok(d) => d,
         Err(e) => {
             error!("system time error: {}", e);
-            return "time error".to_string().with_status(StatusCode::INTERNAL_SERVER_ERROR);
+            return "time error".to_string().customize().with_status(StatusCode::INTERNAL_SERVER_ERROR);
         },
     }.as_micros();
     let tid = now.wrapping_div(10000) as u16;
@@ -390,13 +417,14 @@ async fn subscribe(auth: BearerAuth,
         Ok(s) => s,
         Err(e) => {
             error!("SDP answer get error: {}", e);
-            return "SDP answer generation error".to_string().with_status(StatusCode::BAD_REQUEST);
+            return "SDP answer generation error".to_string().customize().with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("SDP answer: {:.20}", sdp_answer);
     sdp_answer
+        .customize()
         .with_status(StatusCode::CREATED)   // 201
-        .with_header((header::CONTENT_TYPE, "application/sdp"))
+        .insert_header((header::CONTENT_TYPE, "application/sdp"))
 }
 
 /// List publishers in specific room
@@ -405,11 +433,11 @@ async fn list_pub(path: web::Path<String>) -> impl Responder {
     let room = path.into_inner();
 
     if room.is_empty() {
-        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: auth? we check nothing for now
@@ -420,6 +448,7 @@ async fn list_pub(path: web::Path<String>) -> impl Responder {
         .into_iter()
         .reduce(|s, p| s + "," + &p)
         .unwrap_or_default()
+        .customize()
         .with_status(StatusCode::OK)
 }
 
@@ -429,11 +458,11 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
     let room = path.into_inner();
 
     if room.is_empty() {
-        return "room should not be empty".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: auth? we check nothing for now
@@ -444,7 +473,49 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
         .into_iter()
         .reduce(|s, p| s + "," + &p)
         .unwrap_or_default()
+        .customize()
         .with_status(StatusCode::OK)
+}
+
+
+#[get("/liveness")]
+async fn liveness() -> impl Responder {
+    "OK"
+}
+
+#[get("/readiness")]
+async fn readiness() -> impl Responder {
+    // TODO: also check if we have too much peers
+    match IS_STOPPING.get() {
+        Some(true) => "BUSY".customize().with_status(StatusCode::SERVICE_UNAVAILABLE),
+        _ => "OK".customize().with_status(StatusCode::OK)
+    }
+}
+
+#[get("/preStop")]
+async fn prestop() -> impl Responder {
+    info!("stopping system");
+
+    let _ = IS_STOPPING.set(true);
+
+    while SHARED_STATE.has_peers().await {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        info!("still have peers");
+    }
+
+    // stop the servers
+    if let Some(handle) = PUBLIC_SERVER.get() {
+        // spawn task to run the stop, so we won't block current request
+        // (and the stop wait for this request to finish)
+        tokio::spawn(handle.stop(true));
+    }
+    if let Some(handle) = PRIVATE_SERVER.get() {
+        // spawn task to run the stop, so we won't block current request
+        // (and the stop wait for this request to finish)
+        tokio::spawn(handle.stop(true));
+    }
+
+    "OK"
 }
 
 

@@ -54,6 +54,10 @@ pub struct CliOptions {
     /// assign external IP addresses of 1:1 (D)NAT
     #[clap(long, env)]
     pub public_ip: Option<String>,
+
+    /// debug mode (demo site & public management API)
+    #[clap(long, env)]
+    pub debug: bool,
 }
 
 /// parse CLI arguments & load env
