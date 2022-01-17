@@ -619,9 +619,9 @@ pub async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, of
         warn!("generate local_description failed!");
     }
 
-    // limit a publisher to 3 hours for now
-    // after 3 hours, we close the connection
-    let max_time = Duration::from_secs(3 * 60 * 60);
+    // limit a publisher to 24 hours for now
+    // after 24 hours, we close the connection
+    let max_time = Duration::from_secs(24 * 60 * 60);
     timeout(max_time, publisher.notify_close.notified()).await?;
     peer_connection.close().await?;
     info!("leaving publisher main");

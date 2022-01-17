@@ -810,9 +810,9 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         warn!("generate local_description failed!");
     }
 
-    // limit a subscriber to 3 hours for now
-    // after 3 hours, we close the connection
-    let max_time = Duration::from_secs(3 * 60 * 60);
+    // limit a subscriber to 24 hours for now
+    // after 24 hours, we close the connection
+    let max_time = Duration::from_secs(24 * 60 * 60);
     timeout(max_time, subscriber.notify_close.notified()).await?;
     peer_connection.close().await?;
     subscriber.deregister_notify_message();
