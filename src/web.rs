@@ -70,44 +70,48 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     SHARED_STATE.listen_on_commands().await?;
 
     let url = format!("{}:{}", cli.host, cli.port);
+    // set CORS for easier frontend development
+    fn get_cors(cors_domain: String) -> Cors {
+        Cors::default()
+            .allowed_origin_fn(move |origin, _req_head| {
+                // allow any localhost for frontend local development
+                // e.g. "http://localhost" or "https://localhost" or "https://localhost:3000"
+                let domain = origin.to_str()
+                                   .unwrap_or("")
+                                   .splitn(3, ':')
+                                   .skip(1)
+                                   .take(1)
+                                   .next()
+                                   .unwrap_or("");
+                match domain {
+                    "//localhost" => true,
+                    _ => false,
+                }
+            })
+            .allowed_origin_fn(move |origin, _req_head| {
+                origin.to_str()
+                    .unwrap_or("")
+                    .ends_with(&cors_domain)
+            })
+            .allowed_methods(vec!["GET", "POST"])
+            .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
+            .allowed_header(header::CONTENT_TYPE)
+    }
+
+    let cli2 = cli.clone();
     let public_server = HttpServer::new(move || {
-            let data = web::Data::new(cli.clone());
-            let cors_domain = cli.cors_domain.clone();
-            // set CORS for easier frontend development
-            let cors = Cors::default()
-                .allowed_origin_fn(move |origin, _req_head| {
-                    // allow any localhost for frontend local development
-                    // e.g. "http://localhost" or "https://localhost" or "https://localhost:3000"
-                    let domain = origin.to_str()
-                                       .unwrap_or("")
-                                       .splitn(3, ':')
-                                       .skip(1)
-                                       .take(1)
-                                       .next()
-                                       .unwrap_or("");
-                    match domain {
-                        "//localhost" => true,
-                        _ => false,
-                    }
-                })
-                .allowed_origin_fn(move |origin, _req_head| {
-                    origin.to_str()
-                        .unwrap_or("")
-                        .ends_with(&cors_domain)
-                })
-                .allowed_methods(vec!["GET", "POST"])
-                .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
-                .allowed_header(header::CONTENT_TYPE);
+            let data = web::Data::new(cli2.clone());
+            let cors_domain = cli2.cors_domain.clone();
 
             let mut app = App::new()
                 // enable logger
                 .wrap(actix_web::middleware::Logger::default())
-                .wrap(cors)
+                .wrap(get_cors(cors_domain))
                 .app_data(data)
                 .service(publish)
                 .service(subscribe);
 
-            if cli.debug {
+            if cli2.debug {
                 app = app.service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
                          .service(create_pub)
                          .service(create_sub)
@@ -123,8 +127,14 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
         .run();
 
     let private_server = HttpServer::new(move || {
+            let data = web::Data::new(cli.clone());
+            let cors_domain = cli.cors_domain.clone();
+
             App::new()
+                // enable logger
                 .wrap(actix_web::middleware::Logger::default())
+                .wrap(get_cors(cors_domain))
+                .app_data(data)
                 .service(liveness)
                 .service(readiness)
                 .service(prestop)
