@@ -1,4 +1,4 @@
-FROM rust:1.58.0-slim as builder
+FROM rust:1.58.1-slim as builder
 
 # dependencies
 # RUN apt update
