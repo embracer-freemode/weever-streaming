@@ -278,16 +278,15 @@ async fn publish(auth: BearerAuth,
 
     // TODO: verify "Content-Type: application/sdp"
 
-    // disable auth for easier integration for now
-    // // token verification
-    // let token = SHARED_STATE.get_pub_token(&room, &id).await;
-    // if let Ok(token) = token {
-    //     if token != auth.token() {
-    //         return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
-    //     }
-    // } else {
-    //     return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
-    // }
+    // token verification
+    let token = SHARED_STATE.get_pub_token(&room, &id).await;
+    if let Ok(token) = token {
+        if token != auth.token() {
+            return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
+        }
+    } else {
+        return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+    }
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_publisher(&room, &id).await {
@@ -371,16 +370,15 @@ async fn subscribe(auth: BearerAuth,
 
     // TODO: verify "Content-Type: application/sdp"
 
-    // disable auth for easier integration for now
-    // // token verification
-    // let token = SHARED_STATE.get_sub_token(&room, &id).await;
-    // if let Ok(token) = token {
-    //     if token != auth.token() {
-    //         return "bad token".to_string().with_status(StatusCode::UNAUTHORIZED);
-    //     }
-    // } else {
-    //     return "bad token".to_string().with_status(StatusCode::BAD_REQUEST);
-    // }
+    // token verification
+    let token = SHARED_STATE.get_sub_token(&room, &id).await;
+    if let Ok(token) = token {
+        if token != auth.token() {
+            return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
+        }
+    } else {
+        return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+    }
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_subscriber(&room, &id).await {
@@ -440,8 +438,6 @@ async fn list_pub(path: web::Path<String>) -> impl Responder {
         return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
 
-    // TODO: auth? we check nothing for now
-
     info!("listing publishers for room {}", room);
 
     SHARED_STATE.list_publishers(&room).await.unwrap_or_default()
@@ -464,8 +460,6 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
     if !room.chars().all(|c| c.is_ascii_graphic()) {
         return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
     }
-
-    // TODO: auth? we check nothing for now
 
     info!("listing subscribers for room {}", room);
 
