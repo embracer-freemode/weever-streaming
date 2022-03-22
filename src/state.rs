@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use once_cell::sync::Lazy;
 use redis::aio::MultiplexedConnection;
 use redis::AsyncCommands;
-use bincode::{Decode, Encode, config};
+use bincode::{Decode, Encode, config::standard};
 use std::sync::{Arc, RwLock};
 use std::collections::{HashMap, HashSet};
 
@@ -333,7 +333,7 @@ impl SharedState for State {
     async fn send_command(&self, room: &str, cmd: Command) -> Result<()> {
         let subject = format!("cmd.{}", room);
         let mut slice = [0u8; 64];
-        let length = bincode::encode_into_slice(&cmd, &mut slice, config::standard())
+        let length = bincode::encode_into_slice(&cmd, &mut slice, standard())
             .with_context(|| format!("encode command error: {:?}", cmd))?;
         let payload = &slice[..length];
         let nats = self.get_nats().context("get NATS client failed")?;
@@ -342,7 +342,7 @@ impl SharedState for State {
     }
 
     async fn on_command(&self, room: &str, cmd: &[u8]) -> Result<()> {
-        let (cmd, _) = bincode::decode_from_slice(&cmd, config::standard()).context("decode command error")?;
+        let (cmd, _) = bincode::decode_from_slice(&cmd, standard()).context("decode command error")?;
         info!("on cmd, room {} msg '{:?}'", room, cmd);
         match cmd {
             Command::PubJoin(_) => {
