@@ -21,7 +21,6 @@ use webrtc::{
         OnDataChannelHdlrFn,
         OnNegotiationNeededHdlrFn,
         sdp::session_description::RTCSessionDescription,
-        sdp::sdp_type::RTCSdpType,
         configuration::RTCConfiguration,
         peer_connection_state::RTCPeerConnectionState,
     },
@@ -612,10 +611,7 @@ impl Subscriber {
                 };
                 debug!("got new SDP answer: {}", answer);
                 // build SDP Offer type
-                let mut sdp = RTCSessionDescription::default();
-                sdp.sdp_type = RTCSdpType::Answer;
-                sdp.sdp = answer.to_string();
-                let answer = sdp;
+                let answer = RTCSessionDescription::answer(answer.to_string()).unwrap();
                 let need_another_renegotiation = sub.need_another_renegotiation.clone();
                 let is_doing_renegotiation = sub.is_doing_renegotiation.clone();
                 return Box::pin(async move {
@@ -728,10 +724,7 @@ impl Subscriber {
 #[tracing::instrument(name = "sub", skip(cli, offer, answer_tx), level = "info")]  // following log will have "sub{room=..., user=...}" in INFO level
 pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, offer: String, answer_tx: oneshot::Sender<String>, tid: u16) -> Result<()> {
     // build SDP Offer type
-    let mut sdp = RTCSessionDescription::default();
-    sdp.sdp_type = RTCSdpType::Offer;
-    sdp.sdp = offer;
-    let offer = sdp;
+    let offer = RTCSessionDescription::offer(offer.to_string()).unwrap();
 
     // NATS
     info!("getting NATS");

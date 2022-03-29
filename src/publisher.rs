@@ -23,7 +23,6 @@ use webrtc::{
         OnPeerConnectionStateChangeHdlrFn,
         OnDataChannelHdlrFn,
         sdp::session_description::RTCSessionDescription,
-        sdp::sdp_type::RTCSdpType,
         configuration::RTCConfiguration,
         peer_connection_state::RTCPeerConnectionState,
     },
@@ -471,10 +470,7 @@ impl PublisherDetails {
                 };
                 debug!("got new SDP offer: {}", offer);
                 // build SDP Offer type
-                let mut sdp = RTCSessionDescription::default();
-                sdp.sdp_type = RTCSdpType::Offer;
-                sdp.sdp = offer.to_string();
-                let offer = sdp;
+                let offer = RTCSessionDescription::offer(offer.to_string()).unwrap();
                 return Box::pin(async move {
                     // TODO: dynamic add/remove media handling, and let subscribers know
                     let dc = dc.clone();
@@ -562,10 +558,7 @@ pub async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, of
     };  // TODO: remove clone
 
     // build SDP Offer type
-    let mut sdp = RTCSessionDescription::default();
-    sdp.sdp_type = RTCSdpType::Offer;
-    sdp.sdp = offer;
-    let offer = sdp;
+    let offer = RTCSessionDescription::offer(offer.to_string()).unwrap();
 
     // Set a handler for when a new remote track starts, this handler will forward data to our UDP listeners.
     // In your application this is where you would handle/process audio/video
