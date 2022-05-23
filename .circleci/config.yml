@@ -8,7 +8,7 @@ prod_build_branch: &prod_build_branch master
 jobs:
   test:
     docker:
-      - image: cimg/rust:1.59.0
+      - image: cimg/rust:1.61.0
 
     working_directory: ~/repo
     steps:
@@ -37,7 +37,7 @@ jobs:
 
   lint:
     docker:
-      - image: cimg/rust:1.59.0
+      - image: cimg/rust:1.61.0
     steps:
       - checkout
       - run:
@@ -53,7 +53,7 @@ jobs:
 
   security:
     docker:
-      - image: cimg/rust:1.59.0
+      - image: cimg/rust:1.61.0
     steps:
       - checkout
       - run:
