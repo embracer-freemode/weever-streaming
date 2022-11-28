@@ -62,7 +62,7 @@ struct SubscriberDetails {
     user: String,
     room: String,
     pc: Arc<RTCPeerConnection>,
-    nats: nats::asynk::Connection,
+    nats: async_nats::Client,
     notify_close: Arc<tokio::sync::Notify>,
     rtp_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
     rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
@@ -482,12 +482,12 @@ impl Subscriber {
 
             dc.on_open(
                 sub.on_data_channel_sender(dc.clone(), dc_label.clone(), dc_id)
-            ).instrument(tracing::Span::current()).await;
+            );
 
             // Register text message handling
             dc.on_message(
                 sub.on_data_channel_msg(dc.clone(), dc_label)
-            ).instrument(tracing::Span::current()).await;
+            );
 
         }.instrument(tracing::Span::current()))
     }
@@ -686,15 +686,16 @@ impl Subscriber {
         // get RTP from NATS
         let subject = self.get_nats_subect(user, mime, app_id);
         info!("subscribe NATS: {}", subject);
-        let sub = self.nats.subscribe(&subject).await?;
+        let mut sub = self.nats.subscribe(subject.clone()).await.map_err(|_| anyhow!("can't subscribe for RTP forward"))?;
 
         // Read RTP packets forever and send them to the WebRTC Client
         // NOTE: busy loop
         let task = tokio::spawn(async move {
             use webrtc::Error;
+            use futures::StreamExt;
             while let Some(msg) = sub.next().await {
                 // TODO: make sure we leave the loop when subscriber/publisher leave
-                let raw_rtp = msg.data;
+                let raw_rtp = msg.payload;
                 if let Err(err) = track.write(&raw_rtp).await {
                     error!("nats forward err: {:?}", err);
                     if Error::ErrClosedPipe == err {
@@ -752,30 +753,23 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         tokio_tasks: Default::default(),
         is_doing_renegotiation: Default::default(),
         need_another_renegotiation: Default::default(),
+        need_ice_restart: Default::default(),
     }));
 
     subscriber.register_notify_message();
 
     // Set the handler for ICE connection state
     // This will notify you when the peer has connected/disconnected
-    peer_connection
-        .on_ice_connection_state_change(subscriber.on_ice_connection_state_change())
-        .await;
+    peer_connection.on_ice_connection_state_change(subscriber.on_ice_connection_state_change());
 
     // Register data channel creation handling
-    peer_connection
-        .on_data_channel(subscriber.on_data_channel())
-        .await;
+    peer_connection.on_data_channel(subscriber.on_data_channel());
 
     // Set the handler for Peer connection state
     // This will notify you when the peer has connected/disconnected
-    peer_connection
-        .on_peer_connection_state_change(subscriber.on_peer_connection_state_change())
-        .await;
+    peer_connection.on_peer_connection_state_change(subscriber.on_peer_connection_state_change());
 
-    peer_connection
-        .on_negotiation_needed(subscriber.on_negotiation_needed())
-        .await;
+    peer_connection.on_negotiation_needed(subscriber.on_negotiation_needed());
 
     // Set the remote SessionDescription
     peer_connection.set_remote_description(offer).await?;

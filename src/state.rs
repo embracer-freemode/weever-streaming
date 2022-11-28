@@ -44,7 +44,7 @@ impl Command {
 #[derive(Default)]
 pub struct InternalState {
     pub rooms: HashMap<String, Room>,
-    nats: Option<nats::asynk::Connection>,
+    nats: Option<async_nats::Client>,
     redis: Option<MultiplexedConnection>,
 }
 
@@ -75,9 +75,9 @@ pub trait SharedState {
     /// Get Redis connection
     fn get_redis(&self) -> Result<MultiplexedConnection>;
     /// Set NATS connection
-    fn set_nats(&self, nats: nats::asynk::Connection) -> Result<()>;
+    fn set_nats(&self, nats: async_nats::Client) -> Result<()>;
     /// Get NATS connection
-    fn get_nats(&self) -> Result<nats::asynk::Connection>;
+    fn get_nats(&self) -> Result<async_nats::Client>;
 
     /// Set publisher authorization token
     async fn set_pub_token(&self, room: String, user: String, token: String) -> Result<()>;
@@ -142,13 +142,13 @@ impl SharedState for State {
         Ok(state.redis.as_ref().context("get Redis client failed")?.clone())
     }
 
-    fn set_nats(&self, nats: nats::asynk::Connection) -> Result<()> {
+    fn set_nats(&self, nats: async_nats::Client) -> Result<()> {
         let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         state.nats = Some(nats);
         Ok(())
     }
 
-    fn get_nats(&self) -> Result<nats::asynk::Connection> {
+    fn get_nats(&self) -> Result<async_nats::Client> {
         let state = self.read().map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
         Ok(state.nats.as_ref().context("get NATS client failed")?.clone())
     }
@@ -337,7 +337,8 @@ impl SharedState for State {
             .with_context(|| format!("encode command error: {:?}", cmd))?;
         let payload = &slice[..length];
         let nats = self.get_nats().context("get NATS client failed")?;
-        nats.publish(&subject, payload).await.context("publish PUB_JOIN to NATS failed")?;
+        // TODO: avoid copy
+        nats.publish(subject, payload.to_owned().into()).await.context("publish PUB_JOIN to NATS failed")?;
         Ok(())
     }
 
@@ -360,16 +361,17 @@ impl SharedState for State {
         // cmd.ROOM
         // e.g. cmd.1234
         let subject = "cmd.*";
-        let sub = nats.subscribe(subject).await.context("NATS subscribe for commands failed")?;
+        let mut sub = nats.subscribe(subject.to_string()).await.map_err(|_| anyhow!("NATS subscribe for commands failed"))?;
 
-        async fn process(msg: nats::asynk::Message) -> Result<()> {
+        async fn process(msg: async_nats::Message) -> Result<()> {
             let room = msg.subject.splitn(2, ".").skip(1).next()
                 .context("extract room from NATS subject failed")?;
-            SHARED_STATE.on_command(room, &msg.data).await?;
+            SHARED_STATE.on_command(room, &msg.payload).await?;
             Ok(())
         }
 
         tokio::spawn(async move {
+            use futures::StreamExt;
             // TODO: will we exit this loop when disconnect?
             while let Some(msg) = sub.next().await {
                 tokio::spawn(catch(process(msg)));

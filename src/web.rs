@@ -64,7 +64,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
 
     // NATS
     info!("connecting NATS");
-    let nats = nats::asynk::connect(&cli.nats).await.context("can't connect to NATS")?;
+    let nats = async_nats::connect(&cli.nats).await.context("can't connect to NATS")?;
     SHARED_STATE.set_nats(nats)?;
     // run task for listening upcoming commands
     SHARED_STATE.listen_on_commands().await?;

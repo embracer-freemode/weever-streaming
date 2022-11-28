@@ -72,7 +72,7 @@ struct PublisherDetails {
     user: String,
     room: String,
     pc: Arc<RTCPeerConnection>,
-    nats: nats::asynk::Connection,
+    nats: async_nats::Client,
     notify_close: Arc<tokio::sync::Notify>,
     created: std::time::SystemTime,
 }
@@ -307,7 +307,7 @@ impl PublisherDetails {
         }.instrument(tracing::Span::current()));
     }
 
-    fn spawn_rtp_to_nats(room: String, user: String, app_id: String, track: Arc<TrackRemote>, nats: nats::asynk::Connection) {
+    fn spawn_rtp_to_nats(room: String, user: String, app_id: String, track: Arc<TrackRemote>, nats: async_nats::Client) {
         // push RTP to NATS
         // use ID to disquish streams from same publisher
         // NOTE: busy loop
@@ -319,8 +319,9 @@ impl PublisherDetails {
             let mut b = vec![0u8; 1500];
             // use a timeout to make sure we will close this loop if we don't get new RTP for a while
             let max_time = Duration::from_secs(10);
-            while let Ok(Ok((n, _))) = timeout(max_time, track.read(&mut b)).await {
-                nats.publish(&subject, &b[..n]).await?;
+            while let Ok(Ok((_, _))) = timeout(max_time, track.read(&mut b)).await {
+                // TODO: avoid copy
+                nats.publish(subject.clone(), b.clone().into()).await?;
             }
             info!("leaving RTP to NATS push: {}", subject);
             Result::<()>::Ok(())
@@ -439,8 +440,7 @@ impl PublisherDetails {
                     user,
                     wpc,
                     dc.clone(),
-                    dc_label))
-                .instrument(tracing::Span::current()).await;
+                    dc_label));
         }.instrument(tracing::Span::current()))
     }
 
@@ -562,26 +562,18 @@ pub async fn webrtc_to_nats(cli: cli::CliOptions, room: String, user: String, of
 
     // Set a handler for when a new remote track starts, this handler will forward data to our UDP listeners.
     // In your application this is where you would handle/process audio/video
-    peer_connection
-        .on_track(publisher.on_track())
-        .await;
+    peer_connection.on_track(publisher.on_track());
 
     // Set the handler for ICE connection state
     // This will notify you when the peer has connected/disconnected
-    peer_connection
-        .on_ice_connection_state_change(publisher.on_ice_connection_state_change())
-        .await;
+    peer_connection.on_ice_connection_state_change(publisher.on_ice_connection_state_change());
 
     // Set the handler for Peer connection state
     // This will notify you when the peer has connected/disconnected
-    peer_connection
-        .on_peer_connection_state_change(publisher.on_peer_connection_state_change())
-        .await;
+    peer_connection.on_peer_connection_state_change(publisher.on_peer_connection_state_change());
 
     // Register data channel creation handling
-    peer_connection
-        .on_data_channel(publisher.on_data_channel())
-        .await;
+    peer_connection.on_data_channel(publisher.on_data_channel());
 
     // Set the remote SessionDescription
     // this will trigger tranceivers creation underneath
