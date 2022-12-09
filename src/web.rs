@@ -279,14 +279,14 @@ async fn publish(auth: BearerAuth,
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
-    let token = SHARED_STATE.get_pub_token(&room, &id).await;
-    if let Ok(token) = token {
-        if token != auth.token() {
-            return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
-        }
-    } else {
-        return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
-    }
+    // let token = SHARED_STATE.get_pub_token(&room, &id).await;
+    // if let Ok(token) = token {
+    //     if token != auth.token() {
+    //         return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
+    //     }
+    // } else {
+    //     return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+    // }
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_publisher(&room, &id).await {
@@ -371,14 +371,14 @@ async fn subscribe(auth: BearerAuth,
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
-    let token = SHARED_STATE.get_sub_token(&room, &id).await;
-    if let Ok(token) = token {
-        if token != auth.token() {
-            return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
-        }
-    } else {
-        return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
-    }
+    // let token = SHARED_STATE.get_sub_token(&room, &id).await;
+    // if let Ok(token) = token {
+    //     if token != auth.token() {
+    //         return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
+    //     }
+    // } else {
+    //     return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+    // }
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_subscriber(&room, &id).await {
