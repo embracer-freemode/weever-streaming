@@ -753,7 +753,6 @@ pub async fn nats_to_webrtc(cli: cli::CliOptions, room: String, user: String, of
         tokio_tasks: Default::default(),
         is_doing_renegotiation: Default::default(),
         need_another_renegotiation: Default::default(),
-        need_ice_restart: Default::default(),
     }));
 
     subscriber.register_notify_message();
