@@ -2,10 +2,8 @@
 
 use clap::Parser;
 
-
 /// WebRTC SFU server
-#[derive(Clone, Debug)]
-#[derive(Parser)]
+#[derive(Clone, Debug, Parser)]
 pub struct CliOptions {
     /// Domain (will be used for CORS settings)
     #[clap(long, env, default_value = "localhost")]

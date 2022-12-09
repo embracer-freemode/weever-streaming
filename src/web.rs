@@ -1,45 +1,40 @@
 use crate::{
     cli,
-    publisher,
-    subscriber,
     helper::catch,
+    publisher,
     state::{SharedState, SHARED_STATE},
+    subscriber,
 };
-use anyhow::{Result, Context, bail, anyhow};
-use log::{debug, info, error};
-use serde::{Deserialize, Serialize};
+use actix_cors::Cors;
+use actix_files::Files;
 use actix_web::{
-    post, get, web,
-    App, HttpServer, Responder,
-    http::{
-        StatusCode,
-        header,
-    },
     dev::ServerHandle,
+    get,
+    http::{header, StatusCode},
+    post, web, App, HttpServer, Responder,
 };
 use actix_web_httpauth::extractors::bearer::BearerAuth;
-use actix_files::Files;
-use actix_cors::Cors;
+use anyhow::{anyhow, bail, Context, Result};
+use log::{debug, error, info};
+use once_cell::sync::OnceCell;
+use prometheus::{GaugeVec, Opts, Registry, TextEncoder};
 use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
-use prometheus::{Opts, Registry, GaugeVec, TextEncoder};
-use once_cell::sync::OnceCell;
-
+use serde::{Deserialize, Serialize};
 
 pub static PUBLIC_SERVER: OnceCell<ServerHandle> = OnceCell::new();
 pub static PRIVATE_SERVER: OnceCell<ServerHandle> = OnceCell::new();
 pub static IS_STOPPING: OnceCell<bool> = OnceCell::new();
-
 
 /// Web server for communicating with web clients
 #[tokio::main]
 pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     // load ssl keys
     let raw_certs = &mut std::io::BufReader::new(
-        std::fs::File::open(&cli.cert_file).context("can't read SSL cert file")?
+        std::fs::File::open(&cli.cert_file).context("can't read SSL cert file")?,
     );
     let raw_keys = &mut std::io::BufReader::new(
-        std::fs::File::open(&cli.key_file).context("can't read SSL key file")?
+        std::fs::File::open(&cli.key_file).context("can't read SSL key file")?,
     );
     let cert_chain = certs(raw_certs)
         .context("cert parse error")?
@@ -59,88 +54,97 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
 
     // Redis
     let redis_client = redis::Client::open(cli.redis.clone()).context("can't connect to Redis")?;
-    let conn = redis_client.get_multiplexed_tokio_connection().await.context("can't get multiplexed Redis client")?;
+    let conn = redis_client
+        .get_multiplexed_tokio_connection()
+        .await
+        .context("can't get multiplexed Redis client")?;
     SHARED_STATE.set_redis(conn)?;
 
     // NATS
     info!("connecting NATS");
-    let nats = async_nats::connect(&cli.nats).await.context("can't connect to NATS")?;
+    let nats = async_nats::connect(&cli.nats)
+        .await
+        .context("can't connect to NATS")?;
     SHARED_STATE.set_nats(nats)?;
     // run task for listening upcoming commands
     SHARED_STATE.listen_on_commands().await?;
 
     let url = format!("{}:{}", cli.host, cli.port);
     let public_server = HttpServer::new(move || {
-            let data = web::Data::new(cli.clone());
-            let cors_domain = cli.cors_domain.clone();
-            // set CORS for easier frontend development
-            let cors = Cors::default()
-                .allowed_origin_fn(move |origin, _req_head| {
-                    // allow any localhost for frontend local development
-                    // e.g. "http://localhost" or "https://localhost" or "https://localhost:3000"
-                    let domain = origin.to_str()
-                                       .unwrap_or("")
-                                       .splitn(3, ':')
-                                       .skip(1)
-                                       .take(1)
-                                       .next()
-                                       .unwrap_or("");
-                    match domain {
-                        "//localhost" => true,
-                        _ => false,
-                    }
-                })
-                .allowed_origin_fn(move |origin, _req_head| {
-                    origin.to_str()
-                        .unwrap_or("")
-                        .ends_with(&cors_domain)
-                })
-                .allowed_methods(vec!["GET", "POST"])
-                .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
-                .allowed_header(header::CONTENT_TYPE);
+        let data = web::Data::new(cli.clone());
+        let cors_domain = cli.cors_domain.clone();
+        // set CORS for easier frontend development
+        let cors = Cors::default()
+            .allowed_origin_fn(move |origin, _req_head| {
+                // allow any localhost for frontend local development
+                // e.g. "http://localhost" or "https://localhost" or "https://localhost:3000"
+                let domain = origin
+                    .to_str()
+                    .unwrap_or("")
+                    .splitn(3, ':')
+                    .skip(1)
+                    .take(1)
+                    .next()
+                    .unwrap_or("");
+                match domain {
+                    "//localhost" => true,
+                    _ => false,
+                }
+            })
+            .allowed_origin_fn(move |origin, _req_head| {
+                origin.to_str().unwrap_or("").ends_with(&cors_domain)
+            })
+            .allowed_methods(vec!["GET", "POST"])
+            .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
+            .allowed_header(header::CONTENT_TYPE);
 
-            let mut app = App::new()
-                // enable logger
-                .wrap(actix_web::middleware::Logger::default())
-                .wrap(cors)
-                .app_data(data)
-                .service(publish)
-                .service(subscribe);
+        let mut app = App::new()
+            // enable logger
+            .wrap(actix_web::middleware::Logger::default())
+            .wrap(cors)
+            .app_data(data)
+            .service(publish)
+            .service(subscribe);
 
-            if cli.debug {
-                app = app.service(Files::new("/demo", "site").prefer_utf8(true))   // demo site
-                         .service(create_pub)
-                         .service(create_sub)
-                         .service(list_pub)
-                         .service(list_sub);
-            }
-
-            app
-        })
-        .bind_rustls(url, config)?
-        .system_exit()
-        .shutdown_timeout(10)
-        .run();
-
-    let private_server = HttpServer::new(move || {
-            App::new()
-                .wrap(actix_web::middleware::Logger::default())
-                .service(liveness)
-                .service(readiness)
-                .service(prestop)
-                .service(metrics)
+        if cli.debug {
+            app = app
+                .service(Files::new("/demo", "site").prefer_utf8(true)) // demo site
                 .service(create_pub)
                 .service(create_sub)
                 .service(list_pub)
-                .service(list_sub)
-        })
-        .bind("0.0.0.0:9443")?
-        .system_exit()
-        .shutdown_timeout(10)
-        .run();
+                .service(list_sub);
+        }
 
-    PUBLIC_SERVER.set(public_server.handle()).map_err(|_| anyhow!("set public web server handle failed"))?;
-    PRIVATE_SERVER.set(private_server.handle()).map_err(|_| anyhow!("set private web server handle failed"))?;
+        app
+    })
+    .bind_rustls(url, config)?
+    .system_exit()
+    .shutdown_timeout(10)
+    .run();
+
+    let private_server = HttpServer::new(move || {
+        App::new()
+            .wrap(actix_web::middleware::Logger::default())
+            .service(liveness)
+            .service(readiness)
+            .service(prestop)
+            .service(metrics)
+            .service(create_pub)
+            .service(create_sub)
+            .service(list_pub)
+            .service(list_sub)
+    })
+    .bind("0.0.0.0:9443")?
+    .system_exit()
+    .shutdown_timeout(10)
+    .run();
+
+    PUBLIC_SERVER
+        .set(public_server.handle())
+        .map_err(|_| anyhow!("set public web server handle failed"))?;
+    PRIVATE_SERVER
+        .set(private_server.handle())
+        .map_err(|_| anyhow!("set private web server handle failed"))?;
 
     let (result1, result2) = tokio::join!(public_server, private_server);
     result1.context("actix web public server error")?;
@@ -162,7 +166,6 @@ struct CreateSubParams {
     id: String,
     token: Option<String>,
 }
-
 
 /// API for creating publisher
 #[post("/create/pub")]
@@ -202,7 +205,6 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
     "pub set"
 }
 
-
 /// API for creating subscriber
 #[post("/create/sub")]
 async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
@@ -241,39 +243,58 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
     "sub set"
 }
 
-
 /// WebRTC WHIP compatible (sort of) endpoint for running publisher
 #[post("/pub/{room}/{id}")]
-async fn publish(auth: BearerAuth,
-                 cli: web::Data<cli::CliOptions>,
-                 path: web::Path<(String, String)>,
-                 sdp: web::Bytes) -> impl Responder {
+async fn publish(
+    auth: BearerAuth,
+    cli: web::Data<cli::CliOptions>,
+    path: web::Path<(String, String)>,
+    sdp: web::Bytes,
+) -> impl Responder {
     let (room, id) = path.into_inner();
 
     if id.is_empty() {
-        return "id should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "id should not be empty"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     if !id.chars().all(|c| c.is_ascii_graphic()) {
-        return "id should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "id should be ascii graphic"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if id.contains('.') {
-        return "id should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "id should not contain '.'"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     if room.is_empty() {
-        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if room.contains('.') {
-        return "room should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "room should not contain '.'"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -290,16 +311,29 @@ async fn publish(auth: BearerAuth,
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_publisher(&room, &id).await {
-        Ok(true) => return "duplicate publisher".to_string().customize().with_status(StatusCode::BAD_REQUEST),
-        Err(_) => return "publisher check error".to_string().customize().with_status(StatusCode::BAD_REQUEST),
-        _ => {},
+        Ok(true) => {
+            return "duplicate publisher"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::BAD_REQUEST)
+        }
+        Err(_) => {
+            return "publisher check error"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::BAD_REQUEST)
+        }
+        _ => {}
     }
 
     let sdp = match String::from_utf8(sdp.to_vec()) {
         Ok(s) => s,
         Err(e) => {
             error!("SDP parsed error: {}", e);
-            return "bad SDP".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+            return "bad SDP"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("pub: auth {} sdp {:.20?}", auth.token(), sdp);
@@ -312,60 +346,94 @@ async fn publish(auth: BearerAuth,
         Ok(d) => d,
         Err(e) => {
             error!("system time error: {}", e);
-            return "time error".to_string().customize().with_status(StatusCode::INTERNAL_SERVER_ERROR);
-        },
-    }.as_micros();
+            return "time error"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+    .as_micros();
     let tid = now.wrapping_div(10000) as u16;
 
-    tokio::spawn(catch(publisher::webrtc_to_nats(cli.get_ref().clone(), room.clone(), id.clone(), sdp, tx, tid)));
+    tokio::spawn(catch(publisher::webrtc_to_nats(
+        cli.get_ref().clone(),
+        room.clone(),
+        id.clone(),
+        sdp,
+        tx,
+        tid,
+    )));
     // TODO: timeout
     let sdp_answer = match rx.await {
         Ok(s) => s,
         Err(e) => {
             error!("SDP answer get error: {}", e);
-            return "SDP answer generation error".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+            return "SDP answer generation error"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("SDP answer: {:.20}", sdp_answer);
     sdp_answer
         .customize()
-        .with_status(StatusCode::CREATED)       // 201
+        .with_status(StatusCode::CREATED) // 201
         .insert_header((header::CONTENT_TYPE, "application/sdp"))
-        .insert_header((header::LOCATION, ""))    // TODO: what's the need?
+        .insert_header((header::LOCATION, "")) // TODO: what's the need?
 }
 
 /// API for running subscriber
 #[post("/sub/{room}/{id}")]
-async fn subscribe(auth: BearerAuth,
-                   cli: web::Data<cli::CliOptions>,
-                   path: web::Path<(String, String)>,
-                   sdp: web::Bytes) -> impl Responder {
+async fn subscribe(
+    auth: BearerAuth,
+    cli: web::Data<cli::CliOptions>,
+    path: web::Path<(String, String)>,
+    sdp: web::Bytes,
+) -> impl Responder {
     let (room, id) = path.into_inner();
 
     if id.is_empty() {
-        return "id should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "id should not be empty"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     if !id.chars().all(|c| c.is_ascii_graphic()) {
-        return "id should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "id should be ascii graphic"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if id.contains('.') {
-        return "id should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "id should not contain '.'"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     if room.is_empty() {
-        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     // "." will conflict with NATS subject seperator
     if room.contains('.') {
-        return "room should not contain '.'".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "room should not contain '.'"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     // TODO: verify "Content-Type: application/sdp"
@@ -382,16 +450,29 @@ async fn subscribe(auth: BearerAuth,
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_subscriber(&room, &id).await {
-        Ok(true) => return "duplicate subscriber".to_string().customize().with_status(StatusCode::BAD_REQUEST),
-        Err(_) => return "subscriber check error".to_string().customize().with_status(StatusCode::BAD_REQUEST),
-        _ => {},
+        Ok(true) => {
+            return "duplicate subscriber"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::BAD_REQUEST)
+        }
+        Err(_) => {
+            return "subscriber check error"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::BAD_REQUEST)
+        }
+        _ => {}
     }
 
     let sdp = match String::from_utf8(sdp.to_vec()) {
         Ok(s) => s,
         Err(e) => {
             error!("SDP parsed error: {}", e);
-            return "bad SDP".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+            return "bad SDP"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("sub: auth {} sdp {:.20?}", auth.token(), sdp);
@@ -404,24 +485,38 @@ async fn subscribe(auth: BearerAuth,
         Ok(d) => d,
         Err(e) => {
             error!("system time error: {}", e);
-            return "time error".to_string().customize().with_status(StatusCode::INTERNAL_SERVER_ERROR);
-        },
-    }.as_micros();
+            return "time error"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+    .as_micros();
     let tid = now.wrapping_div(10000) as u16;
 
-    tokio::spawn(catch(subscriber::nats_to_webrtc(cli.get_ref().clone(), room.clone(), id.clone(), sdp, tx, tid)));
+    tokio::spawn(catch(subscriber::nats_to_webrtc(
+        cli.get_ref().clone(),
+        room.clone(),
+        id.clone(),
+        sdp,
+        tx,
+        tid,
+    )));
     // TODO: timeout for safety
     let sdp_answer = match rx.await {
         Ok(s) => s,
         Err(e) => {
             error!("SDP answer get error: {}", e);
-            return "SDP answer generation error".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+            return "SDP answer generation error"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::BAD_REQUEST);
         }
     };
     debug!("SDP answer: {:.20}", sdp_answer);
     sdp_answer
         .customize()
-        .with_status(StatusCode::CREATED)   // 201
+        .with_status(StatusCode::CREATED) // 201
         .insert_header((header::CONTENT_TYPE, "application/sdp"))
 }
 
@@ -431,16 +526,25 @@ async fn list_pub(path: web::Path<String>) -> impl Responder {
     let room = path.into_inner();
 
     if room.is_empty() {
-        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     info!("listing publishers for room {}", room);
 
-    SHARED_STATE.list_publishers(&room).await.unwrap_or_default()
+    SHARED_STATE
+        .list_publishers(&room)
+        .await
+        .unwrap_or_default()
         .into_iter()
         .reduce(|s, p| s + "," + &p)
         .unwrap_or_default()
@@ -454,23 +558,31 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
     let room = path.into_inner();
 
     if room.is_empty() {
-        return "room should not be empty".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "room should not be empty"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     if !room.chars().all(|c| c.is_ascii_graphic()) {
-        return "room should be ascii graphic".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        return "room should be ascii graphic"
+            .to_string()
+            .customize()
+            .with_status(StatusCode::BAD_REQUEST);
     }
 
     info!("listing subscribers for room {}", room);
 
-    SHARED_STATE.list_subscribers(&room).await.unwrap_or_default()
+    SHARED_STATE
+        .list_subscribers(&room)
+        .await
+        .unwrap_or_default()
         .into_iter()
         .reduce(|s, p| s + "," + &p)
         .unwrap_or_default()
         .customize()
         .with_status(StatusCode::OK)
 }
-
 
 #[get("/liveness")]
 async fn liveness() -> impl Responder {
@@ -481,8 +593,10 @@ async fn liveness() -> impl Responder {
 async fn readiness() -> impl Responder {
     // TODO: also check if we have too much peers
     match IS_STOPPING.get() {
-        Some(true) => "BUSY".customize().with_status(StatusCode::SERVICE_UNAVAILABLE),
-        _ => "OK".customize().with_status(StatusCode::OK)
+        Some(true) => "BUSY"
+            .customize()
+            .with_status(StatusCode::SERVICE_UNAVAILABLE),
+        _ => "OK".customize().with_status(StatusCode::OK),
     }
 }
 
@@ -512,7 +626,6 @@ async fn prestop() -> impl Responder {
     "OK"
 }
 
-
 /// Prometheus metrics
 #[get("/metrics")]
 async fn metrics() -> impl Responder {
@@ -523,12 +636,20 @@ async fn metrics() -> impl Responder {
 
     // sfu_pod_peer_count
     let gauge_vec = GaugeVec::new(
-            Opts::new("sfu_pod_peer_count", "publishers and subscribers count in current pod (by room, by type)"),
-            &["pod", "room", "type"],
-        ).unwrap();
+        Opts::new(
+            "sfu_pod_peer_count",
+            "publishers and subscribers count in current pod (by room, by type)",
+        ),
+        &["pod", "room", "type"],
+    )
+    .unwrap();
     for (name, room) in SHARED_STATE.read().unwrap().rooms.iter() {
-        gauge_vec.with_label_values(&[&pod, &name, "pub"]).set(room.pubs.len() as f64);
-        gauge_vec.with_label_values(&[&pod, &name, "sub"]).set(room.subs.len() as f64);
+        gauge_vec
+            .with_label_values(&[&pod, &name, "pub"])
+            .set(room.pubs.len() as f64);
+        gauge_vec
+            .with_label_values(&[&pod, &name, "sub"])
+            .set(room.subs.len() as f64);
     }
     reg.register(Box::new(gauge_vec)).unwrap();
 

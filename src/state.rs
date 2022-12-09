@@ -6,22 +6,20 @@
 //! We can implement multiple state mechanism as long as it fit the SharedState trait.
 
 use crate::helper::catch;
-use anyhow::{Result, Context, anyhow};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use log::{info, error};
-use tokio::sync::mpsc;
+use bincode::{config::standard, Decode, Encode};
+use log::{error, info};
 use once_cell::sync::Lazy;
 use redis::aio::MultiplexedConnection;
 use redis::AsyncCommands;
-use bincode::{Decode, Encode, config::standard};
-use std::sync::{Arc, RwLock};
 use std::collections::{HashMap, HashSet};
-
+use std::sync::{Arc, RwLock};
+use tokio::sync::mpsc;
 
 /// Command that we will send across instances.
 /// And we will send some of them to frontend after serialization.
-#[derive(Decode, Encode)]
-#[derive(Debug, Clone)]
+#[derive(Decode, Encode, Debug, Clone)]
 pub enum Command {
     PubJoin(String),
     PubLeft(String),
@@ -37,7 +35,6 @@ impl Command {
     }
 }
 
-
 /// Global state for whole program
 /// It holds NATS & Redis connection,
 /// and per room metadata
@@ -52,7 +49,7 @@ pub struct InternalState {
 #[derive(Debug, Default)]
 pub struct Room {
     pub subs: HashMap<String, PeerConnetionInfo>,
-    pub pubs: HashSet<String>,  // for local metrics generation
+    pub pubs: HashSet<String>, // for local metrics generation
 }
 
 #[derive(Debug, Default)]
@@ -132,34 +129,56 @@ pub trait SharedState {
 #[async_trait]
 impl SharedState for State {
     fn set_redis(&self, conn: MultiplexedConnection) -> Result<()> {
-        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
+        let mut state = self
+            .write()
+            .map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         state.redis = Some(conn);
         Ok(())
     }
 
     fn get_redis(&self) -> Result<MultiplexedConnection> {
-        let state = self.read().map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
-        Ok(state.redis.as_ref().context("get Redis client failed")?.clone())
+        let state = self
+            .read()
+            .map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
+        Ok(state
+            .redis
+            .as_ref()
+            .context("get Redis client failed")?
+            .clone())
     }
 
     fn set_nats(&self, nats: async_nats::Client) -> Result<()> {
-        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
+        let mut state = self
+            .write()
+            .map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         state.nats = Some(nats);
         Ok(())
     }
 
     fn get_nats(&self) -> Result<async_nats::Client> {
-        let state = self.read().map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
-        Ok(state.nats.as_ref().context("get NATS client failed")?.clone())
+        let state = self
+            .read()
+            .map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
+        Ok(state
+            .nats
+            .as_ref()
+            .context("get NATS client failed")?
+            .clone())
     }
 
     async fn set_pub_token(&self, room: String, user: String, token: String) -> Result<()> {
         // redis version:
         let mut conn = self.get_redis()?;
         let key = format!("token#pub#{}#{}", room, user);
-        let _: Option<()> = conn.set(key.clone(), token).await.context("Redis set failed")?;
+        let _: Option<()> = conn
+            .set(key.clone(), token)
+            .await
+            .context("Redis set failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn
+            .expire(key, 24 * 60 * 60)
+            .await
+            .context("Redis expire failed")?;
         Ok(())
     }
 
@@ -167,9 +186,15 @@ impl SharedState for State {
         // redis version:
         let mut conn = self.get_redis()?;
         let key = format!("token#sub#{}#{}", room, user);
-        let _: Option<()> = conn.set(key.clone(), token).await.context("Redis set failed")?;
+        let _: Option<()> = conn
+            .set(key.clone(), token)
+            .await
+            .context("Redis set failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn
+            .expire(key, 24 * 60 * 60)
+            .await
+            .context("Redis expire failed")?;
         Ok(())
     }
 
@@ -177,31 +202,47 @@ impl SharedState for State {
         // redis version:
         let mut conn = self.get_redis()?;
         let key = format!("token#pub#{}#{}", room, user);
-        Ok(conn.get(&key).await.with_context(|| format!("can't get {} from Redis", key))?)
+        Ok(conn
+            .get(&key)
+            .await
+            .with_context(|| format!("can't get {} from Redis", key))?)
     }
 
     async fn get_sub_token(&self, room: &str, user: &str) -> Result<String> {
         // redis version:
         let mut conn = self.get_redis()?;
         let key = format!("token#sub#{}#{}", room, user);
-        Ok(conn.get(&key).await.with_context(|| format!("can't get {} from Redis", key))?)
+        Ok(conn
+            .get(&key)
+            .await
+            .with_context(|| format!("can't get {} from Redis", key))?)
     }
 
     async fn add_user_media_count(&self, room: &str, user: &str, mime: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#media", room);
-        let key = format!("{}#{}", user, mime);    // e.g. video, audio
-        let _: Option<()> = conn.hincr(&redis_key, key, 1).await.context("Redis hincr failed")?;
+        let key = format!("{}#{}", user, mime); // e.g. video, audio
+        let _: Option<()> = conn
+            .hincr(&redis_key, key, 1)
+            .await
+            .context("Redis hincr failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn
+            .expire(&redis_key, 24 * 60 * 60)
+            .await
+            .context("Redis expire failed")?;
         Ok(())
     }
 
     async fn get_users_media_count(&self, room: &str) -> Result<HashMap<(String, String), u8>> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#media", room);
-        let media: Vec<(String, u8)> = conn.hgetall(&redis_key).await.context("Redis hgetall failed")?;
-        let result = media.into_iter()
+        let media: Vec<(String, u8)> = conn
+            .hgetall(&redis_key)
+            .await
+            .context("Redis hgetall failed")?;
+        let result = media
+            .into_iter()
             .filter_map(|(k, v)| {
                 let mut it = k.splitn(2, "#");
                 if let Some((user, mime)) = it.next().zip(it.next()) {
@@ -211,7 +252,10 @@ impl SharedState for State {
             })
             .collect();
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn
+            .expire(&redis_key, 24 * 60 * 60)
+            .await
+            .context("Redis expire failed")?;
         Ok(result)
     }
 
@@ -220,22 +264,39 @@ impl SharedState for State {
         let redis_key = format!("room#{}#media", room);
         let video_key = format!("{}#{}", user, "video");
         let audio_key = format!("{}#{}", user, "audio");
-        let _: Option<()> = conn.hdel(&redis_key, video_key).await.context("Redis hdel failed")?;
-        let _: Option<()> = conn.hdel(&redis_key, audio_key).await.context("Redis hdel failed")?;
+        let _: Option<()> = conn
+            .hdel(&redis_key, video_key)
+            .await
+            .context("Redis hdel failed")?;
+        let _: Option<()> = conn
+            .hdel(&redis_key, audio_key)
+            .await
+            .context("Redis hdel failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn
+            .expire(&redis_key, 24 * 60 * 60)
+            .await
+            .context("Redis expire failed")?;
         Ok(())
     }
 
     async fn add_publisher(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#pub_list", room);
-        let _: Option<()> = conn.sadd(&redis_key, user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn
+            .sadd(&redis_key, user)
+            .await
+            .context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn
+            .expire(&redis_key, 24 * 60 * 60)
+            .await
+            .context("Redis expire failed")?;
 
         // local state (for metrics)
-        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
+        let mut state = self
+            .write()
+            .map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room = state.rooms.entry(room.to_string()).or_default();
         room.pubs.insert(user.to_string());
 
@@ -245,12 +306,20 @@ impl SharedState for State {
     async fn remove_publisher(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#pub_list", room);
-        let _: Option<()> = conn.srem(&redis_key, user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn
+            .srem(&redis_key, user)
+            .await
+            .context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn
+            .expire(&redis_key, 24 * 60 * 60)
+            .await
+            .context("Redis expire failed")?;
 
         // local state (for metrics)
-        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
+        let mut state = self
+            .write()
+            .map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room_obj = state.rooms.entry(room.to_string()).or_default();
         room_obj.pubs.remove(user);
         // if there is no clients for this room
@@ -265,52 +334,78 @@ impl SharedState for State {
     async fn list_publishers(&self, room: &str) -> Result<HashSet<String>> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#pub_list", room);
-        let result: HashSet<String> = conn.smembers(redis_key).await.context("Redis smembers failed")?;
+        let result: HashSet<String> = conn
+            .smembers(redis_key)
+            .await
+            .context("Redis smembers failed")?;
         Ok(result)
     }
 
     async fn exist_publisher(&self, room: &str, user: &str) -> Result<bool> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#pub_list", room);
-        let result: bool = conn.sismember(redis_key, user).await.context("Redis sismember failed")?;
+        let result: bool = conn
+            .sismember(redis_key, user)
+            .await
+            .context("Redis sismember failed")?;
         Ok(result)
     }
 
     async fn add_subscriber(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
-        let _: Option<()> = conn.sadd(&redis_key, user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn
+            .sadd(&redis_key, user)
+            .await
+            .context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn
+            .expire(&redis_key, 24 * 60 * 60)
+            .await
+            .context("Redis expire failed")?;
         Ok(())
     }
 
     async fn remove_subscriber(&self, room: &str, user: &str) -> Result<()> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
-        let _: Option<()> = conn.srem(&redis_key, user).await.context("Redis sadd failed")?;
+        let _: Option<()> = conn
+            .srem(&redis_key, user)
+            .await
+            .context("Redis sadd failed")?;
         // set Redis key TTL to 1 day
-        let _: Option<()> = conn.expire(&redis_key, 24 * 60 * 60).await.context("Redis expire failed")?;
+        let _: Option<()> = conn
+            .expire(&redis_key, 24 * 60 * 60)
+            .await
+            .context("Redis expire failed")?;
         Ok(())
     }
 
     async fn list_subscribers(&self, room: &str) -> Result<HashSet<String>> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
-        let result: HashSet<String> = conn.smembers(redis_key).await.context("Redis smembers failed")?;
+        let result: HashSet<String> = conn
+            .smembers(redis_key)
+            .await
+            .context("Redis smembers failed")?;
         Ok(result)
     }
 
     async fn exist_subscriber(&self, room: &str, user: &str) -> Result<bool> {
         let mut conn = self.get_redis()?;
         let redis_key = format!("room#{}#sub_list", room);
-        let result: bool = conn.sismember(redis_key, user).await.context("Redis sismember failed")?;
+        let result: bool = conn
+            .sismember(redis_key, user)
+            .await
+            .context("Redis sismember failed")?;
         Ok(result)
     }
 
     fn add_sub_notify(&self, room: &str, user: &str, sender: mpsc::Sender<Command>) -> Result<()> {
         // TODO: convert this write lock to read lock, use field interior mutability
-        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
+        let mut state = self
+            .write()
+            .map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room = state.rooms.entry(room.to_string()).or_default();
         let user = room.subs.entry(user.to_string()).or_default();
         user.notify_message = Some(Arc::new(sender.clone()));
@@ -319,7 +414,9 @@ impl SharedState for State {
 
     fn remove_sub_notify(&self, room: &str, user: &str) -> Result<()> {
         // TODO: convert this write lock to read lock, use field interior mutability
-        let mut state = self.write().map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
+        let mut state = self
+            .write()
+            .map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room_obj = state.rooms.entry(room.to_string()).or_default();
         let _ = room_obj.subs.remove(user);
         // if there is no clients for this room
@@ -338,20 +435,23 @@ impl SharedState for State {
         let payload = &slice[..length];
         let nats = self.get_nats().context("get NATS client failed")?;
         // TODO: avoid copy
-        nats.publish(subject, payload.to_owned().into()).await.context("publish PUB_JOIN to NATS failed")?;
+        nats.publish(subject, payload.to_owned().into())
+            .await
+            .context("publish PUB_JOIN to NATS failed")?;
         Ok(())
     }
 
     async fn on_command(&self, room: &str, cmd: &[u8]) -> Result<()> {
-        let (cmd, _) = bincode::decode_from_slice(&cmd, standard()).context("decode command error")?;
+        let (cmd, _) =
+            bincode::decode_from_slice(&cmd, standard()).context("decode command error")?;
         info!("on cmd, room {} msg '{:?}'", room, cmd);
         match cmd {
             Command::PubJoin(_) => {
                 self.forward_to_all_subs(room, cmd).await?;
-            },
+            }
             Command::PubLeft(_) => {
                 self.forward_to_all_subs(room, cmd).await?;
-            },
+            }
         }
         Ok(())
     }
@@ -361,10 +461,17 @@ impl SharedState for State {
         // cmd.ROOM
         // e.g. cmd.1234
         let subject = "cmd.*";
-        let mut sub = nats.subscribe(subject.to_string()).await.map_err(|_| anyhow!("NATS subscribe for commands failed"))?;
+        let mut sub = nats
+            .subscribe(subject.to_string())
+            .await
+            .map_err(|_| anyhow!("NATS subscribe for commands failed"))?;
 
         async fn process(msg: async_nats::Message) -> Result<()> {
-            let room = msg.subject.splitn(2, ".").skip(1).next()
+            let room = msg
+                .subject
+                .splitn(2, ".")
+                .skip(1)
+                .next()
                 .context("extract room from NATS subject failed")?;
             SHARED_STATE.on_command(room, &msg.payload).await?;
             Ok(())
@@ -383,7 +490,9 @@ impl SharedState for State {
 
     async fn forward_to_all_subs(&self, room: &str, cmd: Command) -> Result<()> {
         let subs = {
-            let state = self.read().map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
+            let state = self
+                .read()
+                .map_err(|e| anyhow!("Get global state as read failed: {}", e))?;
             let room = match state.rooms.get(room) {
                 Some(room) => room,
                 None => return Ok(()),
@@ -394,7 +503,10 @@ impl SharedState for State {
                 .collect::<Vec<_>>()
         };
         for sub in subs {
-            let result = sub.send(cmd.clone()).await.with_context(|| format!("send {:?} to mpsc Sender failed", cmd));
+            let result = sub
+                .send(cmd.clone())
+                .await
+                .with_context(|| format!("send {:?} to mpsc Sender failed", cmd));
             if let Err(err) = result {
                 error!("{:?}", err);
             }
