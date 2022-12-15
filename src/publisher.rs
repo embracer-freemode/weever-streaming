@@ -576,7 +576,7 @@ impl PublisherDetails {
 
 /// Extract RTP streams from WebRTC, and send it to NATS
 ///
-/// based on [rtp-forwarder](https://github.com/webrtc-rs/webrtc/tree/master/examples/rtp-forwarder) example
+/// The first version was based on webrtc-rs rtp-forwarder example.
 #[tracing::instrument(name = "pub", skip(cli, offer, answer_tx), level = "info")] // following log will have "pub{room=..., user=...}" in INFO level
 pub async fn webrtc_to_nats(
     cli: cli::CliOptions,

@@ -4,15 +4,14 @@ use anyhow::{Context, Result};
 use log::debug;
 use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-mod cli;
-mod helper;
-mod publisher;
-mod state;
-mod subscriber;
-mod web;
+pub mod cli;
+pub mod helper;
+pub mod publisher;
+pub mod state;
+pub mod subscriber;
+pub mod web;
 
 /// entrypoint for whole program
-#[allow(dead_code)]
 fn main() -> Result<()> {
     // CLI
     let args = cli::get_args();

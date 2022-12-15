@@ -1,4 +1,4 @@
-/// Web endpoint for setup WebRTC connection
+//! Web endpoint for setup WebRTC connection
 use crate::{
     cli,
     helper::catch,

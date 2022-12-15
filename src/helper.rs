@@ -1,3 +1,4 @@
+//! small helper functions
 use anyhow::Result;
 
 /// log out error messages if we have error with anyhow type

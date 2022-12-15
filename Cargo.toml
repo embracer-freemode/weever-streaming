@@ -8,10 +8,6 @@ keywords = ["webrtc"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name = "webrtc-sfu"
-path = "src/lib.rs"
-
 [dependencies]
 anyhow = "1.0.66"
 async-trait = "0.1.59"
