@@ -1,8 +1,4 @@
-FROM rust:1.61.0-slim as builder
-
-# dependencies
-# RUN apt update
-# RUN apt install -y pkg-config libssl-dev
+FROM rust:1.65.0-slim as builder
 
 ARG TRIPLE=x86_64-unknown-linux-gnu
 ARG PROJ=webrtc-sfu
@@ -21,7 +17,7 @@ RUN strip target/${TRIPLE}/release/${PROJ}
 
 ##########
 
-FROM debian:bullseye-20220509-slim
+FROM debian:bullseye-20221205-slim
 
 ARG TRIPLE=x86_64-unknown-linux-gnu
 ARG PROJ=webrtc-sfu
