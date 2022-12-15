@@ -1,0 +1,44 @@
+version: "3.8"
+services:
+  redis:
+    image: redis:7.0.5-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    command: redis-server
+  nats:
+    image: nats:2.9.9-alpine
+    restart: always
+    ports:
+      - "4222:4222"
+    healthcheck:
+      test: ["CMD", "nc", "-zv", "localhost", "4222"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    command: nats-server
+  sfu:
+    image: webrtc-sfu:latest
+    restart: always
+    ports:
+      - "8443:8443"
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    links:
+      - redis
+      - nats
+    command: |
+      /webrtc-sfu
+      --debug
+      --cert-file certs/cert.pem
+      --key-file certs/key.pem
+      --redis redis://redis
+      --nats nats
