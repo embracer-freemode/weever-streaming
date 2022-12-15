@@ -9,10 +9,10 @@ ADD Cargo.lock Cargo.lock
 # fetch all dependencies as cache
 RUN mkdir -p .cargo && cargo vendor > .cargo/config
 # dummy build to build all dependencies as cache
-RUN mkdir src/ && echo "" > src/lib.rs && cargo build --lib --release --target ${TRIPLE} && rm -f src/lib.rs
+RUN mkdir src/ && echo "fn main() {}" > src/main.rs && cargo build --bin ${PROJ} --release --target ${TRIPLE} && rm -f src/main.rs
 # get real code in
 COPY . .
-RUN touch src/lib.rs && cargo build --release --bin ${PROJ} --target ${TRIPLE} --features release_max_level_debug
+RUN touch src/main.rs && cargo build --release --bin ${PROJ} --target ${TRIPLE} --features release_max_level_debug
 RUN strip target/${TRIPLE}/release/${PROJ}
 
 ##########
@@ -23,9 +23,12 @@ ARG TRIPLE=x86_64-unknown-linux-gnu
 ARG PROJ=webrtc-sfu
 COPY --from=builder /target/${TRIPLE}/release/${PROJ} .
 COPY site site
+# debug certs, you should override it in production
+COPY certs certs
 
 # log current git commit hash for future investigation (need to pass in from outside)
 ARG COMMIT_SHA
 RUN echo ${COMMIT_SHA} > /commit
 
-CMD ./webrtc-sfu
+ENV RUST_LOG=info,webrtc_mdns=error,webrtc_srtp=info
+CMD ./webrtc-sfu --cert-file certs/cert.pem --key-file certs/key.pem

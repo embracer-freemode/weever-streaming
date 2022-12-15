@@ -3,3 +3,4 @@
 !Cargo.toml
 !Cargo.lock
 !site/**
+!certs/**
