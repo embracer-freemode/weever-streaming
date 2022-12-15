@@ -1,3 +1,4 @@
+/// Web endpoint for setup WebRTC connection
 use crate::{
     cli,
     helper::catch,
@@ -22,9 +23,14 @@ use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use serde::{Deserialize, Serialize};
 
+
+/// publich API server handle
 pub static PUBLIC_SERVER: OnceCell<ServerHandle> = OnceCell::new();
+/// private API server handle
 pub static PRIVATE_SERVER: OnceCell<ServerHandle> = OnceCell::new();
+/// global flag for checking if the instance is going to stop
 pub static IS_STOPPING: OnceCell<bool> = OnceCell::new();
+
 
 /// Web server for communicating with web clients
 #[tokio::main]
@@ -106,6 +112,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
             .service(publish)
             .service(subscribe);
 
+        // if the debug option is enabled, we show the demo site
         if cli.debug {
             app = app
                 .service(Files::new("/demo", "site").prefer_utf8(true)) // demo site
@@ -167,7 +174,7 @@ struct CreateSubParams {
     token: Option<String>,
 }
 
-/// API for creating publisher
+/// Register publisher token
 #[post("/create/pub")]
 async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
     info!("create pub: {:?}", params);
@@ -205,7 +212,7 @@ async fn create_pub(params: web::Json<CreatePubParams>) -> impl Responder {
     "pub set"
 }
 
-/// API for creating subscriber
+/// Register subscriber token
 #[post("/create/sub")]
 async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
     info!("create sub: {:?}", params);
@@ -243,7 +250,7 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
     "sub set"
 }
 
-/// WebRTC WHIP compatible (sort of) endpoint for running publisher
+/// WebRTC WHIP compatible (sort of) endpoint for publisher connection
 #[post("/pub/{room}/{id}")]
 async fn publish(
     auth: BearerAuth,
@@ -300,14 +307,16 @@ async fn publish(
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
-    // let token = SHARED_STATE.get_pub_token(&room, &id).await;
-    // if let Ok(token) = token {
-    //     if token != auth.token() {
-    //         return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
-    //     }
-    // } else {
-    //     return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
-    // }
+    if cli.auth {
+        let token = SHARED_STATE.get_pub_token(&room, &id).await;
+        if let Ok(token) = token {
+            if token != auth.token() {
+                return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
+            }
+        } else {
+            return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        }
+    }
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_publisher(&room, &id).await {
@@ -382,7 +391,7 @@ async fn publish(
         .insert_header((header::LOCATION, "")) // TODO: what's the need?
 }
 
-/// API for running subscriber
+/// WebRTC WHEP compatible (sort of) endpoint for subscriber connection
 #[post("/sub/{room}/{id}")]
 async fn subscribe(
     auth: BearerAuth,
@@ -439,14 +448,16 @@ async fn subscribe(
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
-    // let token = SHARED_STATE.get_sub_token(&room, &id).await;
-    // if let Ok(token) = token {
-    //     if token != auth.token() {
-    //         return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
-    //     }
-    // } else {
-    //     return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
-    // }
+    if cli.auth {
+        let token = SHARED_STATE.get_sub_token(&room, &id).await;
+        if let Ok(token) = token {
+            if token != auth.token() {
+                return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
+            }
+        } else {
+            return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+        }
+    }
 
     // check if there is another publisher in the room with same id
     match SHARED_STATE.exist_subscriber(&room, &id).await {
@@ -584,11 +595,14 @@ async fn list_sub(path: web::Path<String>) -> impl Responder {
         .with_status(StatusCode::OK)
 }
 
+/// Kubernetes liveness probe
 #[get("/liveness")]
 async fn liveness() -> impl Responder {
     "OK"
 }
 
+/// Kubernetes readiness probe
+/// We won't route new peers in when we are closing.
 #[get("/readiness")]
 async fn readiness() -> impl Responder {
     // TODO: also check if we have too much peers
@@ -600,12 +614,15 @@ async fn readiness() -> impl Responder {
     }
 }
 
+/// [Kubernetes preStop hook](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks)
 #[get("/preStop")]
 async fn prestop() -> impl Responder {
     info!("stopping system");
 
+    // We won't route new peers in when we are closing.
     let _ = IS_STOPPING.set(true);
 
+    // wait for existing peers, so we won't break existing streams
     while SHARED_STATE.has_peers().await {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
         info!("still have peers");
