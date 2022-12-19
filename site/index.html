@@ -33,87 +33,6 @@ window.sendSDPOfferDataChannel = function(dc, offer, log) {
   dc.send("SDP_OFFER " + offer.sdp);
 }
 </script>
-<h2>Create publisher (per publisher security token setting for pushing streams)</h2>
-(this will only be called from other in-cluster service for settings)<br/>
-room: <input id="create_pub_room" type="text"></input><br/>
-id: <input id="create_pub_id" type="text"></input><br/>
-token: <input id="create_pub_token" type="text"></input><br/>
-<button onclick="window.createPublisher()">Create Publisher</button><br/><br/>
-Logs:<br/>
-<div id="create_pub_log"></div>
-<script>
-window.createPublisher = () => {
-  let log = msg => {
-    document.getElementById("create_pub_log").innerHTML += msg + "<br>"
-  }
-
-  let room = document.getElementById("create_pub_room").value;
-  let id = document.getElementById("create_pub_id").value;
-  let token = document.getElementById("create_pub_token").value;
-  let params = {
-      "room": room,
-      "id": id,
-      "token": token,
-  };
-
-  fetch("/create/pub", {
-    method: "POST",
-    headers: {
-      "Accept": "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(params),
-  }).then(res => {
-    log(`Request complete! URL ${res.url} status ${res.status}`);
-    res.text().then(function(answer) {
-      log(answer);
-    })
-  });
-}
-</script>
-<hr>
-
-<!-- ---------- -->
-
-<h2>Create subscriber (per subscriber security token setting for pulling streams)</h2>
-(this will only be called from other in-cluster service for settings)<br/>
-room: <input id="create_sub_room" type="text"></input><br/>
-id: <input id="create_sub_id" type="text"></input><br/>
-token: <input id="create_sub_token" type="text"></input><br/>
-<button onclick="window.createSubscriber()">Create Subscriber</button><br/><br/>
-Logs:<br/>
-<div id="create_sub_log"></div>
-<script>
-window.createSubscriber = () => {
-  let log = msg => {
-    document.getElementById("create_sub_log").innerHTML += msg + "<br>"
-  }
-
-  let room = document.getElementById("create_sub_room").value;
-  let id = document.getElementById("create_sub_id").value;
-  let token = document.getElementById("create_sub_token").value;
-  let params = {
-      "room": room,
-      "id": id,
-      "token": token,
-  };
-
-  fetch("/create/sub", {
-    method: "POST",
-    headers: {
-      "Accept": "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(params),
-  }).then(res => {
-    log(`Request complete! URL ${res.url} status ${res.status}`);
-    res.text().then(function(answer) {
-      log(answer);
-    })
-  });
-}
-</script>
-<hr>
 
 <!-- ---------- -->
 
@@ -137,7 +56,7 @@ video framerate: <input type="number" id="run_pub_video_framerate" min="0" max="
 <button id="run_pub_stop" hidden>Stop Publisher</button><br/><br/>
 <button id="run_pub_screenshare" hidden> Start Screen Share </button>
 <button id="run_pub_screenshare_stop" hidden> Stop Screen Share </button><br />
-<button id="run_pub_ice_restart"> Ice Restart </button><br />
+<!-- <button id="run_pub_ice_restart"> Ice Restart </button><br /> -->
 message: <input id="pub_dc" type="text"></input><br/>
 <button onclick="window.pubSendMessage()">Send Message</button><br /><br />
 <video id="pub_video" width="160" height="120" autoplay muted></video><br />
@@ -232,20 +151,20 @@ window.runPublisher = () => {
   }
 
   // button for triggering ICE restart
-  document.getElementById("run_pub_ice_restart").onclick = () => {
-    // time profiling
-    timestamp_start = Date.now();
-    timestamp_create_offer = Date.now();
+  // document.getElementById("run_pub_ice_restart").onclick = () => {
+  //   // time profiling
+  //   timestamp_start = Date.now();
+  //   timestamp_create_offer = Date.now();
 
-    is_ice_restart = true;
+  //   is_ice_restart = true;
 
-    pub_pc.createOffer({"iceRestart": true})
-      .then(offer => {
-        pub_pc.setLocalDescription(offer);
-        document.getElementById("pubLocalSessionDescription").value = offer.sdp;
-      })
-      .catch(log);
-  }
+  //   pub_pc.createOffer({"iceRestart": true})
+  //     .then(offer => {
+  //       pub_pc.setLocalDescription(offer);
+  //       document.getElementById("pubLocalSessionDescription").value = offer.sdp;
+  //     })
+  //     .catch(log);
+  // }
 
   // setup a data channel (this only manipulate browser objects, it does not setup the connection yet)
   let dataChannel = pub_pc.createDataChannel("control", {"ordered": true, "maxRetransmits": 20})
@@ -405,7 +324,7 @@ selected local candidate: <div id="run_sub_local_ice"></div>
 selected remote candidate: <div id="run_sub_remote_ice"></div>
 <button id="run_sub_start" onclick="window.runSubscriber()"> Start Session </button>
 <button id="run_sub_stop" hidden>Stop Session</button><br/><br/>
-<button id="run_sub_ice_restart"> Ice Restart </button><br />
+<!-- <button id="run_sub_ice_restart"> Ice Restart </button><br /> -->
 <br/>
 Video<br/>
 <div id="sub_videos"></div><br/><br />
@@ -540,20 +459,20 @@ window.runSubscriber = () => {
   }
 
   // button for triggering ICE restart
-  document.getElementById("run_sub_ice_restart").onclick = () => {
-    // time profiling
-    timestamp_start = Date.now();
-    timestamp_create_offer = Date.now();
+  // document.getElementById("run_sub_ice_restart").onclick = () => {
+  //   // time profiling
+  //   timestamp_start = Date.now();
+  //   timestamp_create_offer = Date.now();
 
-    is_ice_restart = true
+  //   is_ice_restart = true
 
-    sub_pc.createOffer({"iceRestart": true})
-      .then(offer => {
-        sub_pc.setLocalDescription(offer);
-        document.getElementById("subLocalSessionDescription").value = offer.sdp;
-      })
-      .catch(log);
-  }
+  //   sub_pc.createOffer({"iceRestart": true})
+  //     .then(offer => {
+  //       sub_pc.setLocalDescription(offer);
+  //       document.getElementById("subLocalSessionDescription").value = offer.sdp;
+  //     })
+  //     .catch(log);
+  // }
 
   // function for sending messages via data channel
   // will be used by button for testing too
@@ -637,58 +556,4 @@ video {
     max-height: 200;
 }
 </style>
-<hr>
-
-<!-- ---------- -->
-
-<h2>List Publishers</h2>
-room: <input id="list_pubs_room" type="text"></input><br/>
-<button onclick="window.listPublishers()">List Publishers</button><br/><br/>
-Logs:<br/>
-<div id="list_pubs_log"></div>
-<script>
-window.listPublishers = () => {
-  let log = msg => {
-    document.getElementById("list_pubs_log").innerHTML += msg + "<br>"
-  }
-
-  let room = document.getElementById("list_pubs_room").value;
-
-  fetch(`/list/pub/${room}`, {
-    method: "GET",
-  }).then(res => {
-    log(`Request complete! URL ${res.url} status ${res.status}`);
-    res.text().then(function(answer) {
-      log(answer);
-    })
-  });
-}
-</script>
-<hr>
-
-<!-- ---------- -->
-
-<h2>List Subscribers</h2>
-room: <input id="list_subs_room" type="text"></input><br/>
-<button onclick="window.listSubscribers()">List Subscribers</button><br/><br/>
-Logs:<br/>
-<div id="list_subs_log"></div>
-<script>
-window.listSubscribers = () => {
-  let log = msg => {
-    document.getElementById("list_subs_log").innerHTML += msg + "<br>"
-  }
-
-  let room = document.getElementById("list_subs_room").value;
-
-  fetch(`/list/sub/${room}`, {
-    method: "GET",
-  }).then(res => {
-    log(`Request complete! URL ${res.url} status ${res.status}`);
-    res.text().then(function(answer) {
-      log(answer);
-    })
-  });
-}
-</script>
 <hr>

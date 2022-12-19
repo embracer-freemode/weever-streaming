@@ -1,0 +1,135 @@
+<h2>Create publisher (per publisher security token setting for pushing streams)</h2>
+(this will only be called from other in-cluster service for settings)<br/>
+room: <input id="create_pub_room" type="text"></input><br/>
+id: <input id="create_pub_id" type="text"></input><br/>
+token: <input id="create_pub_token" type="text"></input><br/>
+<button onclick="window.createPublisher()">Create Publisher</button><br/><br/>
+Logs:<br/>
+<div id="create_pub_log"></div>
+<script>
+window.createPublisher = () => {
+  let log = msg => {
+    document.getElementById("create_pub_log").innerHTML += msg + "<br>"
+  }
+
+  let room = document.getElementById("create_pub_room").value;
+  let id = document.getElementById("create_pub_id").value;
+  let token = document.getElementById("create_pub_token").value;
+  let params = {
+      "room": room,
+      "id": id,
+      "token": token,
+  };
+
+  fetch("/create/pub", {
+    method: "POST",
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(params),
+  }).then(res => {
+    log(`Request complete! URL ${res.url} status ${res.status}`);
+    res.text().then(function(answer) {
+      log(answer);
+    })
+  });
+}
+</script>
+<hr>
+
+<!-- ---------- -->
+
+<h2>Create subscriber (per subscriber security token setting for pulling streams)</h2>
+(this will only be called from other in-cluster service for settings)<br/>
+room: <input id="create_sub_room" type="text"></input><br/>
+id: <input id="create_sub_id" type="text"></input><br/>
+token: <input id="create_sub_token" type="text"></input><br/>
+<button onclick="window.createSubscriber()">Create Subscriber</button><br/><br/>
+Logs:<br/>
+<div id="create_sub_log"></div>
+<script>
+window.createSubscriber = () => {
+  let log = msg => {
+    document.getElementById("create_sub_log").innerHTML += msg + "<br>"
+  }
+
+  let room = document.getElementById("create_sub_room").value;
+  let id = document.getElementById("create_sub_id").value;
+  let token = document.getElementById("create_sub_token").value;
+  let params = {
+      "room": room,
+      "id": id,
+      "token": token,
+  };
+
+  fetch("/create/sub", {
+    method: "POST",
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(params),
+  }).then(res => {
+    log(`Request complete! URL ${res.url} status ${res.status}`);
+    res.text().then(function(answer) {
+      log(answer);
+    })
+  });
+}
+</script>
+<hr>
+
+<!-- ---------- -->
+
+<h2>List Publishers</h2>
+room: <input id="list_pubs_room" type="text"></input><br/>
+<button onclick="window.listPublishers()">List Publishers</button><br/><br/>
+Logs:<br/>
+<div id="list_pubs_log"></div>
+<script>
+window.listPublishers = () => {
+  let log = msg => {
+    document.getElementById("list_pubs_log").innerHTML += msg + "<br>"
+  }
+
+  let room = document.getElementById("list_pubs_room").value;
+
+  fetch(`/list/pub/${room}`, {
+    method: "GET",
+  }).then(res => {
+    log(`Request complete! URL ${res.url} status ${res.status}`);
+    res.text().then(function(answer) {
+      log(answer);
+    })
+  });
+}
+</script>
+<hr>
+
+<!-- ---------- -->
+
+<h2>List Subscribers</h2>
+room: <input id="list_subs_room" type="text"></input><br/>
+<button onclick="window.listSubscribers()">List Subscribers</button><br/><br/>
+Logs:<br/>
+<div id="list_subs_log"></div>
+<script>
+window.listSubscribers = () => {
+  let log = msg => {
+    document.getElementById("list_subs_log").innerHTML += msg + "<br>"
+  }
+
+  let room = document.getElementById("list_subs_room").value;
+
+  fetch(`/list/sub/${room}`, {
+    method: "GET",
+  }).then(res => {
+    log(`Request complete! URL ${res.url} status ${res.status}`);
+    res.text().then(function(answer) {
+      log(answer);
+    })
+  });
+}
+</script>
+<hr>
