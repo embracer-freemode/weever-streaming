@@ -1,4 +1,4 @@
-FROM rust:1.65.0-slim as builder
+FROM rust:1.66.0-slim as builder
 
 ARG TRIPLE=x86_64-unknown-linux-gnu
 ARG PROJ=webrtc-sfu
