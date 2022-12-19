@@ -27,6 +27,39 @@ Features
 * internal traffic routing across SFU instances (currently via NATS)
 
 
+Try It
+========================================
+
+```sh
+git clone https://github.com/aioniclabs/webrtc-sfu
+cd webrtc-sfu
+# you need to install "docker-compose" first
+# this will launch: 1 Redis, 3 NATS, 3 WebRTC SFU
+#
+#   ┌──────┐    ┌──────┐    ┌──────┐
+#   │ SFU1 ├──┐ │ SFU2 ├──┐ │ SFU3 ├──┐
+#   └───┬──┘  │ └───┬──┘  │ └───┬──┘  │
+#       │     │     │     │     │     │
+#   ┌───▼───┐ │ ┌───▼───┐ │ ┌───▼───┐ │
+#   │ NATS1 ◄─┼─► NATS2 ◄─┼─► NATS3 │ │
+#   └───────┘ │ └───────┘ │ └───────┘ │
+#             │           │           │
+#   ┌─────────▼───────────▼───────────▼──┐
+#   │               Redis                │
+#   └────────────────────────────────────┘
+#
+docker-compose up
+
+# visit website:
+#
+# * https://localhost:8443/demo/index.html
+# * https://localhost:8444/demo/index.html
+# * https://localhost:8445/demo/index.html
+#
+# The default demo site is using self signed certs, so you need to ignore the warning in browser.
+```
+
+
 Special Thanks
 ========================================
 
