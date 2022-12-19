@@ -39,6 +39,7 @@ use webrtc::{
     rtp_transceiver::{
         rtp_codec::{RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType},
         rtp_receiver::RTCRtpReceiver,
+        RTCRtpTransceiver,
     },
     track::track_remote::TrackRemote,
 };
@@ -203,89 +204,78 @@ impl PublisherDetails {
         let audio_count = Arc::new(AtomicU8::new(0));
 
         Box::new(
-            move |track: Option<Arc<TrackRemote>>, _receiver: Option<Arc<RTCRtpReceiver>>| {
+            move |track: Arc<TrackRemote>,
+                  _receiver: Arc<RTCRtpReceiver>,
+                  _transceiver: Arc<RTCRtpTransceiver>| {
                 let _enter = span.enter(); // populate user & room info in following logs
 
                 info!("getting new track");
 
-                if let Some(track) = track {
-                    let wpc = wpc.clone();
-                    let user = user.clone();
-                    let room = room.clone();
-                    let nc = nc.clone();
-                    let track_count = track_count.clone();
-                    let video_count = video_count.clone();
-                    let audio_count = audio_count.clone();
-                    return Box::pin(
-                        async move {
-                            let tid = track.tid();
-                            let kind = track.kind().to_string();
-                            let stream_id = track.stream_id().await;
-                            let msid = track.msid().await;
-                            info!(
-                                "new track: tid {}, kind {}, pt {}, ssrc {}, stream_id {}, msid {}",
-                                tid,
-                                kind,
-                                track.payload_type(),
-                                track.ssrc(),
-                                stream_id, // the stream_id here generated from browser might be "{xxx}"
-                                msid, // the msid here generated from browser might be "{xxx} {ooo}"
-                            );
+                let wpc = wpc.clone();
+                let user = user.clone();
+                let room = room.clone();
+                let nc = nc.clone();
+                let track_count = track_count.clone();
+                let video_count = video_count.clone();
+                let audio_count = audio_count.clone();
+                Box::pin(
+                    async move {
+                        let tid = track.tid();
+                        let kind = track.kind().to_string();
+                        let stream_id = track.stream_id().await;
+                        let msid = track.msid().await;
+                        info!(
+                            "new track: tid {}, kind {}, pt {}, ssrc {}, stream_id {}, msid {}",
+                            tid,
+                            kind,
+                            track.payload_type(),
+                            track.ssrc(),
+                            stream_id, // the stream_id here generated from browser might be "{xxx}"
+                            msid, // the msid here generated from browser might be "{xxx} {ooo}"
+                        );
 
-                            let count = track_count.fetch_add(1, Ordering::SeqCst) + 1;
-                            // app_id will become like "video0", "audio0"
-                            let app_id = match kind.as_str() {
-                                "video" => {
-                                    let c = video_count.fetch_add(1, Ordering::SeqCst);
-                                    format!("video{}", c)
-                                }
-                                "audio" => {
-                                    let c = audio_count.fetch_add(1, Ordering::SeqCst);
-                                    format!("audio{}", c)
-                                }
-                                _ => unreachable!(),
-                            };
-
-                            catch(SHARED_STATE.add_user_media_count(&room, &user, &kind)).await;
-
-                            // if all the tranceivers have active track
-                            // let's fire the publisher join notify to all subscribers
-                            {
-                                let pc = match wpc.upgrade() {
-                                    None => return,
-                                    Some(pc) => pc,
-                                };
-                                let total = pc.get_transceivers().await.len();
-                                // TODO: make sure only fire once even in renegotiation?
-                                if count as usize >= total {
-                                    info!("we got {} active remote tracks, all ready", total);
-                                    Self::notify_subs_for_join(&room, &user).await;
-                                } else {
-                                    info!(
-                                        "we got {} active remote tracks, target is {}",
-                                        count, total
-                                    );
-                                }
+                        let count = track_count.fetch_add(1, Ordering::SeqCst) + 1;
+                        // app_id will become like "video0", "audio0"
+                        let app_id = match kind.as_str() {
+                            "video" => {
+                                let c = video_count.fetch_add(1, Ordering::SeqCst);
+                                format!("video{}", c)
                             }
+                            "audio" => {
+                                let c = audio_count.fetch_add(1, Ordering::SeqCst);
+                                format!("audio{}", c)
+                            }
+                            _ => unreachable!(),
+                        };
 
-                            // Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
-                            let media_ssrc = track.ssrc();
-                            Self::spawn_periodic_pli(wpc.clone(), media_ssrc);
+                        catch(SHARED_STATE.add_user_media_count(&room, &user, &kind)).await;
 
-                            // push RTP to NATS
-                            Self::spawn_rtp_to_nats(
-                                room,
-                                user,
-                                app_id.to_string(),
-                                track,
-                                nc.clone(),
-                            );
+                        // if all the tranceivers have active track
+                        // let's fire the publisher join notify to all subscribers
+                        {
+                            let pc = match wpc.upgrade() {
+                                None => return,
+                                Some(pc) => pc,
+                            };
+                            let total = pc.get_transceivers().await.len();
+                            // TODO: make sure only fire once even in renegotiation?
+                            if count as usize >= total {
+                                info!("we got {} active remote tracks, all ready", total);
+                                Self::notify_subs_for_join(&room, &user).await;
+                            } else {
+                                info!("we got {} active remote tracks, target is {}", count, total);
+                            }
                         }
-                        .instrument(tracing::Span::current()),
-                    );
-                }
 
-                Box::pin(async {})
+                        // Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
+                        let media_ssrc = track.ssrc();
+                        Self::spawn_periodic_pli(wpc.clone(), media_ssrc);
+
+                        // push RTP to NATS
+                        Self::spawn_rtp_to_nats(room, user, app_id.to_string(), track, nc.clone());
+                    }
+                    .instrument(tracing::Span::current()),
+                )
             },
         )
     }
