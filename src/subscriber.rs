@@ -324,7 +324,7 @@ impl Subscriber {
                     .map_err(|e| anyhow!("get rtp_tracks as writer failed: {}", e))?
                     .entry((pub_user.to_string(), track_id.to_string()))
                     .and_modify(|e| *e = track.clone())
-                    .or_insert(track.clone());
+                    .or_insert_with(|| track.clone());
 
                 // NOTE: make sure the track is added before leaving this function
                 let rtp_sender = pc
@@ -340,7 +340,7 @@ impl Subscriber {
                     .map_err(|e| anyhow!("get rtp_senders as writer failed: {}", e))?
                     .entry((pub_user.clone(), track_id.clone()))
                     .and_modify(|e| *e = rtp_sender.clone())
-                    .or_insert(rtp_sender.clone());
+                    .or_insert_with(|| rtp_sender.clone());
 
                 // Read incoming RTCP packets
                 // Before these packets are returned they are processed by interceptors. For things

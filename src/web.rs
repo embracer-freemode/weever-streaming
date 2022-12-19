@@ -23,14 +23,12 @@ use rustls::server::ServerConfig;
 use rustls_pemfile::{certs, pkcs8_private_keys};
 use serde::{Deserialize, Serialize};
 
-
 /// publich API server handle
 pub static PUBLIC_SERVER: OnceCell<ServerHandle> = OnceCell::new();
 /// private API server handle
 pub static PRIVATE_SERVER: OnceCell<ServerHandle> = OnceCell::new();
 /// global flag for checking if the instance is going to stop
 pub static IS_STOPPING: OnceCell<bool> = OnceCell::new();
-
 
 /// Web server for communicating with web clients
 #[tokio::main]
@@ -92,10 +90,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                     .take(1)
                     .next()
                     .unwrap_or("");
-                match domain {
-                    "//localhost" => true,
-                    _ => false,
-                }
+                matches!(domain, "//localhost")
             })
             .allowed_origin_fn(move |origin, _req_head| {
                 origin.to_str().unwrap_or("").ends_with(&cors_domain)
@@ -311,10 +306,16 @@ async fn publish(
         let token = SHARED_STATE.get_pub_token(&room, &id).await;
         if let Ok(token) = token {
             if token != auth.token() {
-                return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
+                return "bad token"
+                    .to_string()
+                    .customize()
+                    .with_status(StatusCode::UNAUTHORIZED);
             }
         } else {
-            return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+            return "bad token"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::BAD_REQUEST);
         }
     }
 
@@ -452,10 +453,16 @@ async fn subscribe(
         let token = SHARED_STATE.get_sub_token(&room, &id).await;
         if let Ok(token) = token {
             if token != auth.token() {
-                return "bad token".to_string().customize().with_status(StatusCode::UNAUTHORIZED);
+                return "bad token"
+                    .to_string()
+                    .customize()
+                    .with_status(StatusCode::UNAUTHORIZED);
             }
         } else {
-            return "bad token".to_string().customize().with_status(StatusCode::BAD_REQUEST);
+            return "bad token"
+                .to_string()
+                .customize()
+                .with_status(StatusCode::BAD_REQUEST);
         }
     }
 

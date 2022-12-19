@@ -468,7 +468,9 @@ impl SharedState for State {
 
         async fn process(msg: async_nats::Message) -> Result<()> {
             let room = msg
-                .subject.split_once('.').map(|x| x.1)
+                .subject
+                .split_once('.')
+                .map(|x| x.1)
                 .context("extract room from NATS subject failed")?;
             SHARED_STATE.on_command(room, &msg.payload).await?;
             Ok(())
