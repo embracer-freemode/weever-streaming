@@ -58,7 +58,7 @@ pub struct PeerConnetionInfo {
 }
 
 pub type State = Lazy<RwLock<InternalState>>;
-pub static SHARED_STATE: State = Lazy::new(|| Default::default());
+pub static SHARED_STATE: State = Lazy::new(Default::default);
 
 /// Interface for global state
 ///
@@ -244,7 +244,7 @@ impl SharedState for State {
         let result = media
             .into_iter()
             .filter_map(|(k, v)| {
-                let mut it = k.splitn(2, "#");
+                let mut it = k.splitn(2, '#');
                 if let Some((user, mime)) = it.next().zip(it.next()) {
                     return Some(((user.to_string(), mime.to_string()), v));
                 }
@@ -408,7 +408,7 @@ impl SharedState for State {
             .map_err(|e| anyhow!("Get global state as write failed: {}", e))?;
         let room = state.rooms.entry(room.to_string()).or_default();
         let user = room.subs.entry(user.to_string()).or_default();
-        user.notify_message = Some(Arc::new(sender.clone()));
+        user.notify_message = Some(Arc::new(sender));
         Ok(())
     }
 
@@ -443,7 +443,7 @@ impl SharedState for State {
 
     async fn on_command(&self, room: &str, cmd: &[u8]) -> Result<()> {
         let (cmd, _) =
-            bincode::decode_from_slice(&cmd, standard()).context("decode command error")?;
+            bincode::decode_from_slice(cmd, standard()).context("decode command error")?;
         info!("on cmd, room {} msg '{:?}'", room, cmd);
         match cmd {
             Command::PubJoin(_) => {
@@ -468,10 +468,7 @@ impl SharedState for State {
 
         async fn process(msg: async_nats::Message) -> Result<()> {
             let room = msg
-                .subject
-                .splitn(2, ".")
-                .skip(1)
-                .next()
+                .subject.split_once('.').map(|x| x.1)
                 .context("extract room from NATS subject failed")?;
             SHARED_STATE.on_command(room, &msg.payload).await?;
             Ok(())

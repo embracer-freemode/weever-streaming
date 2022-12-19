@@ -229,7 +229,7 @@ impl Subscriber {
         let rtp_forward_tasks = &self.rtp_forward_tasks;
         let sub = self;
 
-        let media = SHARED_STATE.get_users_media_count(&room).await?;
+        let media = SHARED_STATE.get_users_media_count(room).await?;
 
         let sub_id = sub_user.splitn(2, '+').take(1).next().unwrap_or(""); // "ID+RANDOM" -> "ID"
 
@@ -628,11 +628,11 @@ impl Subscriber {
 
             let dc = dc.clone();
 
-            let msg_str = String::from_utf8(msg.data.to_vec()).unwrap_or(String::new());
+            let msg_str = String::from_utf8(msg.data.to_vec()).unwrap_or_default();
             info!("Message from DataChannel '{}': '{:.20}'", dc_label, msg_str);
 
             if msg_str.starts_with("SDP_ANSWER ") {
-                let answer = match msg_str.splitn(2, " ").skip(1).next() {
+                let answer = match msg_str.split_once(' ').map(|x| x.1) {
                     Some(o) => o,
                     _ => return Box::pin(async {}),
                 };

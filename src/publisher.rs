@@ -365,7 +365,7 @@ impl PublisherDetails {
         let room = self.room.clone();
         let user = self.user.clone();
         let notify_close = self.notify_close.clone();
-        let created = self.created.clone();
+        let created = self.created;
 
         Box::new(move |s: RTCPeerConnectionState| {
             let _enter = span.enter(); // populate user & room info in following logs
@@ -491,11 +491,11 @@ impl PublisherDetails {
 
             let dc = dc.clone();
 
-            let msg_str = String::from_utf8(msg.data.to_vec()).unwrap_or(String::new());
+            let msg_str = String::from_utf8(msg.data.to_vec()).unwrap_or_default();
             info!("Message from DataChannel '{}': '{:.20}'", dc_label, msg_str);
 
             if msg_str.starts_with("SDP_OFFER ") {
-                let offer = match msg_str.splitn(2, " ").skip(1).next() {
+                let offer = match msg_str.split_once(' ').map(|x| x.1) {
                     Some(o) => o,
                     _ => return Box::pin(async {}),
                 };
@@ -568,7 +568,7 @@ impl PublisherDetails {
         info!("notify subscribers for publisher leave");
         // remove from global state
         // TODO: better mechanism
-        catch(SHARED_STATE.remove_user_media_count(&room, &user)).await;
+        catch(SHARED_STATE.remove_user_media_count(room, user)).await;
         catch(SHARED_STATE.send_command(room, Command::PubLeft(user.to_string()))).await;
         Ok(())
     }

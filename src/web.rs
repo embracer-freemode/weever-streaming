@@ -649,7 +649,7 @@ async fn metrics() -> impl Responder {
     let reg = Registry::new();
 
     // we will pass POD_NAME via Kubernetes setup
-    let pod = std::env::var("POD_NAME").unwrap_or(String::new());
+    let pod = std::env::var("POD_NAME").unwrap_or_default();
 
     // sfu_pod_peer_count
     let gauge_vec = GaugeVec::new(
@@ -662,10 +662,10 @@ async fn metrics() -> impl Responder {
     .unwrap();
     for (name, room) in SHARED_STATE.read().unwrap().rooms.iter() {
         gauge_vec
-            .with_label_values(&[&pod, &name, "pub"])
+            .with_label_values(&[&pod, name, "pub"])
             .set(room.pubs.len() as f64);
         gauge_vec
-            .with_label_values(&[&pod, &name, "sub"])
+            .with_label_values(&[&pod, name, "sub"])
             .set(room.subs.len() as f64);
     }
     reg.register(Box::new(gauge_vec)).unwrap();
