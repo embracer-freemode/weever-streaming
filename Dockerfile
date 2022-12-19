@@ -21,7 +21,7 @@ FROM debian:bullseye-20221205-slim
 
 ARG TRIPLE=x86_64-unknown-linux-gnu
 ARG PROJ=webrtc-sfu
-COPY --from=builder /target/${TRIPLE}/release/${PROJ} .
+COPY --from=builder /target/${TRIPLE}/release/${PROJ} /usr/local/bin/
 COPY site site
 # debug certs, you should override it in production
 COPY certs certs
@@ -31,4 +31,4 @@ ARG COMMIT_SHA
 RUN echo ${COMMIT_SHA} > /commit
 
 ENV RUST_LOG=info,webrtc_mdns=error,webrtc_srtp=info
-CMD ./webrtc-sfu --cert-file certs/cert.pem --key-file certs/key.pem
+CMD webrtc-sfu --cert-file certs/cert.pem --key-file certs/key.pem
