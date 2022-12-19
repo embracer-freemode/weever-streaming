@@ -1,28 +1,61 @@
+# Overview:
+#
+#   ┌──────┐    ┌──────┐    ┌──────┐
+#   │ SFU1 ├──┐ │ SFU2 ├──┐ │ SFU3 ├──┐
+#   └───┬──┘  │ └───┬──┘  │ └───┬──┘  │
+#       │     │     │     │     │     │
+#   ┌───▼───┐ │ ┌───▼───┐ │ ┌───▼───┐ │
+#   │ NATS1 ◄─┼─► NATS2 ◄─┼─► NATS3 │ │
+#   └───────┘ │ └───────┘ │ └───────┘ │
+#             │           │           │
+#   ┌─────────▼───────────▼───────────▼──┐
+#   │               Redis                │
+#   └────────────────────────────────────┘
+#
+#
 version: "3.8"
 services:
   redis:
     image: redis:7.0.5-alpine
     restart: always
-    ports:
-      - "6379:6379"
+    # ports:
+    #   - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 10s
       retries: 5
     command: redis-server
-  nats:
+  nats1:
     image: nats:2.9.9-alpine
     restart: always
-    ports:
-      - "4222:4222"
+    # ports:
+    #   - "4222:4222"
     healthcheck:
       test: ["CMD", "nc", "-zv", "localhost", "4222"]
       interval: 30s
       timeout: 10s
       retries: 5
-    command: nats-server
-  sfu:
+    command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --routes nats://nats1:6222,nats://nats2:6222,nats://nats3:6222"
+  nats2:
+    image: nats:2.9.9-alpine
+    restart: always
+    healthcheck:
+      test: ["CMD", "nc", "-zv", "localhost", "4222"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --routes nats://nats1:6222,nats://nats2:6222,nats://nats3:6222"
+  nats3:
+    image: nats:2.9.9-alpine
+    restart: always
+    healthcheck:
+      test: ["CMD", "nc", "-zv", "localhost", "4222"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --routes nats://nats1:6222,nats://nats2:6222,nats://nats3:6222"
+  sfu1:
     image: webrtc-sfu:latest
     restart: always
     ports:
@@ -30,15 +63,55 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      nats:
+      nats1:
         condition: service_healthy
     links:
       - redis
-      - nats
+      - nats1
     command: |
-      /webrtc-sfu
+      webrtc-sfu
       --debug
       --cert-file certs/cert.pem
       --key-file certs/key.pem
       --redis redis://redis
-      --nats nats
+      --nats nats1
+  sfu2:
+    image: webrtc-sfu:latest
+    restart: always
+    ports:
+      - "8444:8443"
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats2:
+        condition: service_healthy
+    links:
+      - redis
+      - nats2
+    command: |
+      webrtc-sfu
+      --debug
+      --cert-file certs/cert.pem
+      --key-file certs/key.pem
+      --redis redis://redis
+      --nats nats2
+  sfu3:
+    image: webrtc-sfu:latest
+    restart: always
+    ports:
+      - "8445:8443"
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats3:
+        condition: service_healthy
+    links:
+      - redis
+      - nats3
+    command: |
+      webrtc-sfu
+      --debug
+      --cert-file certs/cert.pem
+      --key-file certs/key.pem
+      --redis redis://redis
+      --nats nats3
