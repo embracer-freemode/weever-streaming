@@ -52,13 +52,13 @@ video resolution: <select id="run_pub_video_resolution">
     <option value="4320">4320p (8K)</option>
 </select><br/>
 video framerate: <input type="number" id="run_pub_video_framerate" min="0" max="60" value="30"></br>
-<button id="run_pub_start" onclick="window.runPublisher()">Run Publisher</button>
+<button id="run_pub_start" onclick="window.runPublisher()"> Start Session </button>
 <button id="run_pub_stop" hidden>Stop Publisher</button><br/><br/>
 <button id="run_pub_screenshare" hidden> Start Screen Share </button>
-<button id="run_pub_screenshare_stop" hidden> Stop Screen Share </button><br />
+<button id="run_pub_screenshare_stop" hidden> Stop Screen Share </button><br /><br />
 <!-- <button id="run_pub_ice_restart"> Ice Restart </button><br /> -->
-message: <input id="pub_dc" type="text"></input><br/>
-<button onclick="window.pubSendMessage()">Send Message</button><br /><br />
+<!-- message: <input id="pub_dc" type="text"></input><br/> -->
+<!-- <button onclick="window.pubSendMessage()">Send Message</button><br /><br /> -->
 <video id="pub_video" width="160" height="120" autoplay muted></video><br />
 <video id="pub_video_screenshare" width="160" height="120" autoplay muted></video><br />
 local offer: <br/><textarea id="pubLocalSessionDescription" readonly="true"></textarea>
@@ -318,18 +318,19 @@ window.runPublisher = () => {
 room: <input id="run_sub_room" type="text"></input><br/>
 id: <input id="run_sub_id" type="text"></input><br/>
 token: <input id="run_sub_token" type="text"></input><br/>
+<button id="run_sub_start" onclick="window.runSubscriber()"> Start Session </button>
+<br/>
+<br/>
+Videos:<br/>
+<div id="sub_videos"></div><br/><br />
 local offer: <br/><textarea id="subLocalSessionDescription" readonly="true"></textarea><br/>
 remote answer: <br/><textarea id="subRemoteSessionDescription" readonly="true"></textarea><br/>
 selected local candidate: <div id="run_sub_local_ice"></div>
 selected remote candidate: <div id="run_sub_remote_ice"></div>
-<button id="run_sub_start" onclick="window.runSubscriber()"> Start Session </button>
 <button id="run_sub_stop" hidden>Stop Session</button><br/><br/>
 <!-- <button id="run_sub_ice_restart"> Ice Restart </button><br /> -->
-<br/>
-Video<br/>
-<div id="sub_videos"></div><br/><br />
-message: <input id="sub_dc" type="text"></input><br/>
-<button onclick="window.subSendMessage()">Send Message</button><br /><br />
+<!-- message: <input id="sub_dc" type="text"></input><br/> -->
+<!-- <button onclick="window.subSendMessage()">Send Message</button><br /><br /> -->
 Logs<br/>
 <div id="sub_log"></div>
 <script>
