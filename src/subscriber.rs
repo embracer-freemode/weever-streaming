@@ -53,7 +53,7 @@ struct SubscriberDetails {
     user: String,
     room: String,
     pc: Arc<RTCPeerConnection>,
-    nats: async_nats::Client,
+    nats: nats::asynk::Connection,
     notify_close: Arc<tokio::sync::Notify>,
     rtp_tracks: Arc<RwLock<HashMap<(String, String), Arc<TrackLocalStaticRTP>>>>,
     rtp_senders: Arc<RwLock<HashMap<(String, String), Arc<RTCRtpSender>>>>,
@@ -735,9 +735,9 @@ impl Subscriber {
         // get RTP from NATS
         let subject = self.get_nats_subect(user, mime, app_id);
         info!("subscribe NATS: {}", subject);
-        let mut sub = self
+        let sub = self
             .nats
-            .subscribe(subject.clone())
+            .subscribe(&subject)
             .await
             .map_err(|_| anyhow!("can't subscribe for RTP forward"))?;
 
@@ -745,11 +745,10 @@ impl Subscriber {
         // NOTE: busy loop
         let task = tokio::spawn(
             async move {
-                use futures::StreamExt;
                 use webrtc::Error;
                 while let Some(msg) = sub.next().await {
                     // TODO: make sure we leave the loop when subscriber/publisher leave
-                    let raw_rtp = msg.payload;
+                    let raw_rtp = msg.data;
                     if let Err(err) = track.write(&raw_rtp).await {
                         error!("nats forward err: {:?}", err);
                         if Error::ErrClosedPipe == err {

@@ -66,7 +66,7 @@ struct PublisherDetails {
     user: String,
     room: String,
     pc: Arc<RTCPeerConnection>,
-    nats: async_nats::Client,
+    nats: nats::asynk::Connection,
     notify_close: Arc<tokio::sync::Notify>,
     created: std::time::SystemTime,
 }
@@ -314,7 +314,7 @@ impl PublisherDetails {
         user: String,
         app_id: String,
         track: Arc<TrackRemote>,
-        nats: async_nats::Client,
+        nats: nats::asynk::Connection,
     ) {
         // push RTP to NATS
         // use ID to disquish streams from same publisher
@@ -329,8 +329,7 @@ impl PublisherDetails {
                 // use a timeout to make sure we will close this loop if we don't get new RTP for a while
                 let max_time = Duration::from_secs(10);
                 while let Ok(Ok((_, _))) = timeout(max_time, track.read(&mut b)).await {
-                    // TODO: avoid copy
-                    nats.publish(subject.clone(), b.clone().into()).await?;
+                    nats.publish(&subject, &b).await?;
                 }
                 info!("leaving RTP to NATS push: {}", subject);
                 Result::<()>::Ok(())
