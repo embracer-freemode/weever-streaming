@@ -92,7 +92,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 // e.g. "http://localhost" or "https://localhost" or "https://localhost:3000"
                 //
                 // and a allow any host with explicit set cors_domain
-                matches!(domain, cors_domain if !cors_domain.is_empty()) || matches!(domain, "//localhost")
+                matches!(domain, "//localhost") || matches!(domain, _ if domain == cors_domain)
             })
             .allowed_methods(vec!["GET", "POST"])
             .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
