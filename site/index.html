@@ -53,7 +53,7 @@ video resolution: <select id="run_pub_video_resolution">
 </select><br/>
 video framerate: <input type="number" id="run_pub_video_framerate" min="0" max="60" value="30"></br>
 <button id="run_pub_start" onclick="window.runPublisher()"> Start Session </button>
-<button id="run_pub_stop" hidden>Stop Publisher</button><br/><br/>
+<button id="run_pub_stop" hidden>Stop Session</button><br/><br/>
 <button id="run_pub_screenshare" hidden> Start Screen Share </button>
 <button id="run_pub_screenshare_stop" hidden> Stop Screen Share </button><br /><br />
 <!-- <button id="run_pub_ice_restart"> Ice Restart </button><br /> -->
@@ -319,6 +319,7 @@ room: <input id="run_sub_room" type="text"></input><br/>
 id: <input id="run_sub_id" type="text"></input><br/>
 token: <input id="run_sub_token" type="text"></input><br/>
 <button id="run_sub_start" onclick="window.runSubscriber()"> Start Session </button>
+<button id="run_sub_stop" hidden>Stop Session</button><br/><br/>
 <br/>
 <br/>
 Videos:<br/>
@@ -327,7 +328,6 @@ local offer: <br/><textarea id="subLocalSessionDescription" readonly="true"></te
 remote answer: <br/><textarea id="subRemoteSessionDescription" readonly="true"></textarea><br/>
 selected local candidate: <div id="run_sub_local_ice"></div>
 selected remote candidate: <div id="run_sub_remote_ice"></div>
-<button id="run_sub_stop" hidden>Stop Session</button><br/><br/>
 <!-- <button id="run_sub_ice_restart"> Ice Restart </button><br /> -->
 <!-- message: <input id="sub_dc" type="text"></input><br/> -->
 <!-- <button onclick="window.subSendMessage()">Send Message</button><br /><br /> -->
