@@ -22,8 +22,8 @@ services:
     #   - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
     command: redis-server
   nats1:
@@ -33,8 +33,8 @@ services:
     #   - "4222:4222"
     healthcheck:
       test: ["CMD", "nc", "-zv", "localhost", "4222"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
     command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --routes nats://nats1:6222,nats://nats2:6222,nats://nats3:6222"
   nats2:
@@ -42,8 +42,8 @@ services:
     restart: always
     healthcheck:
       test: ["CMD", "nc", "-zv", "localhost", "4222"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
     command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --routes nats://nats1:6222,nats://nats2:6222,nats://nats3:6222"
   nats3:
@@ -51,8 +51,8 @@ services:
     restart: always
     healthcheck:
       test: ["CMD", "nc", "-zv", "localhost", "4222"]
-      interval: 30s
-      timeout: 10s
+      interval: 10s
+      timeout: 5s
       retries: 5
     command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --routes nats://nats1:6222,nats://nats2:6222,nats://nats3:6222"
   sfu1:
@@ -65,12 +65,10 @@ services:
         condition: service_healthy
       nats1:
         condition: service_healthy
-    links:
-      - redis
-      - nats1
     command: |
       webrtc-sfu
       --debug
+      --port 8443
       --cert-file certs/cert.pem
       --key-file certs/key.pem
       --redis redis://redis
@@ -79,18 +77,16 @@ services:
     image: webrtc-sfu:latest
     restart: always
     ports:
-      - "8444:8443"
+      - "8444:8444"
     depends_on:
       redis:
         condition: service_healthy
       nats2:
         condition: service_healthy
-    links:
-      - redis
-      - nats2
     command: |
       webrtc-sfu
       --debug
+      --port 8444
       --cert-file certs/cert.pem
       --key-file certs/key.pem
       --redis redis://redis
@@ -99,18 +95,16 @@ services:
     image: webrtc-sfu:latest
     restart: always
     ports:
-      - "8445:8443"
+      - "8445:8445"
     depends_on:
       redis:
         condition: service_healthy
       nats3:
         condition: service_healthy
-    links:
-      - redis
-      - nats3
     command: |
       webrtc-sfu
       --debug
+      --port 8445
       --cert-file certs/cert.pem
       --key-file certs/key.pem
       --redis redis://redis
