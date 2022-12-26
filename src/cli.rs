@@ -17,6 +17,10 @@ pub struct CliOptions {
     #[arg(short, long, env, default_value = "8443")]
     pub port: String,
 
+    /// private server port
+    #[arg(long, env, default_value = "9443")]
+    pub private_port: String,
+
     /// NATS server URL
     #[arg(short, long, env, default_value = "localhost")]
     pub nats: String,

@@ -74,6 +74,9 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     SHARED_STATE.listen_on_commands().await?;
 
     let url = format!("{}:{}", cli.host, cli.port);
+    let private_url = format!("{}:{}", cli.host, cli.private_port);
+    info!("public URL {url}");
+    info!("private URL {private_url}");
     let public_server = HttpServer::new(move || {
         let data = web::Data::new(cli.clone());
         let cors_domain = format!("//{}", cli.cors_domain);
@@ -135,7 +138,7 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
             .service(list_pub)
             .service(list_sub)
     })
-    .bind("0.0.0.0:9443")?
+    .bind(private_url)?
     .system_exit()
     .shutdown_timeout(10)
     .run();
