@@ -1,5 +1,5 @@
-Cloud Native, Horizontal Scaling WebRTC SFU
-===========================================
+WebRTC SFU: Cloud Native, Horizontal Scaling
+============================================
 
 A WebRTC SFU (Selective Forwarding Unit) server aim to be horizontal scalable.
 
