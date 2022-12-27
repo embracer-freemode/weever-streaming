@@ -33,6 +33,7 @@ Try It
 ```sh
 git clone https://github.com/aioniclabs/webrtc-sfu
 cd webrtc-sfu
+
 # you need to install "docker-compose" first
 # this will launch: 1 Redis, 3 NATS, 3 WebRTC SFU
 #
@@ -58,6 +59,13 @@ docker-compose up
 #
 # The default demo site is using self signed certs, so you need to ignore the warning in browser.
 ```
+
+
+
+Deployment
+========================================
+
+See [deployment docs](./DEPLOYMENT.md)
 
 
 Special Thanks
