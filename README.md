@@ -65,7 +65,7 @@ docker-compose up
 Deployment
 ========================================
 
-See [deployment docs](./DEPLOYMENT.md)
+See [deployment docs](./docs/deployment.md)
 
 
 Special Thanks
