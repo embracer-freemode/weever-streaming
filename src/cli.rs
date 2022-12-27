@@ -5,7 +5,7 @@ use clap::Parser;
 /// WebRTC SFU server
 #[derive(Clone, Debug, Parser)]
 pub struct CliOptions {
-    /// Domain (will be used for CORS settings)
+    /// CORS domain
     #[arg(long, env, default_value = "localhost")]
     pub cors_domain: String,
 
@@ -13,11 +13,11 @@ pub struct CliOptions {
     #[arg(long, env, default_value = "0.0.0.0")]
     pub host: String,
 
-    /// Web server port
+    /// Web server port (Public)
     #[arg(short, long, env, default_value = "8443")]
     pub port: String,
 
-    /// private server port
+    /// Private web server port (Management, Metrics, Probes)
     #[arg(long, env, default_value = "9443")]
     pub private_port: String,
 
