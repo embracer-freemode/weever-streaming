@@ -53,9 +53,9 @@ docker-compose up
 
 # visit website:
 #
-# * https://localhost:8443/demo/index.html
-# * https://localhost:8444/demo/index.html
-# * https://localhost:8445/demo/index.html
+# * https://localhost:8443/
+# * https://localhost:8444/
+# * https://localhost:8445/
 #
 # The default demo site is using self signed certs, so you need to ignore the warning in browser.
 ```
