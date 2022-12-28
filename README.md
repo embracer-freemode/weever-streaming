@@ -20,7 +20,7 @@ Features
 * [WHIP](https://datatracker.ietf.org/doc/draft-ietf-wish-whip/)-like media ingress
     - it's WHIP-"like" because there is no guarantee about spec compliance
     - but this project learned the idea from there
-* [WHEP](https://datatracker.ietf.org/doc/draft-ietf-wish-whap/)-like media egress
+* [WHEP](https://datatracker.ietf.org/doc/draft-murillo-whep/)-like media egress
     - it's WHEP-"like" because there is no guarantee about spec compliance
     - this project implemented similar idea before there is WHEP spec release
 * shared internal states across SFU instances (currently via Redis)
