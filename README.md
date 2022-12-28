@@ -61,6 +61,8 @@ docker-compose up
 ```
 
 
+[![SFU demo](https://user-images.githubusercontent.com/2716047/209774978-aba37989-dca9-427e-8519-821d2cd16790.mp4)](https://user-images.githubusercontent.com/2716047/209774978-aba37989-dca9-427e-8519-821d2cd16790.mp4)
+
 
 Deployment
 ========================================
