@@ -56,7 +56,7 @@ services:
       retries: 5
     command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --routes nats://nats1:6222,nats://nats2:6222,nats://nats3:6222"
   sfu1:
-    image: webrtc-sfu:latest
+    image: ghcr.io/aioniclabs/webrtc-sfu:latest
     restart: always
     ports:
       - "8443:8443"
@@ -74,7 +74,7 @@ services:
       --redis redis://redis
       --nats nats1
   sfu2:
-    image: webrtc-sfu:latest
+    image: ghcr.io/aioniclabs/webrtc-sfu:latest
     restart: always
     ports:
       - "8444:8444"
@@ -92,7 +92,7 @@ services:
       --redis redis://redis
       --nats nats2
   sfu3:
-    image: webrtc-sfu:latest
+    image: ghcr.io/aioniclabs/webrtc-sfu:latest
     restart: always
     ports:
       - "8445:8445"
