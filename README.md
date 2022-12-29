@@ -16,15 +16,19 @@ Clients can connect to any pod, they don't need to be in same instance.
 Features
 ========================================
 
-* multistream: one connection for subscriber for any amount of incoming streams
+* 1 HTTP POST for connection setup
+* subscriber multistream
+    - 1 connection for any amount of stream subscribing (`O(1)` port usage)
+    - publisher is 1 connection for each stream publishing (`O(N)` port usage)
+* (optional) authentication via Bearer Token
 * [WHIP](https://datatracker.ietf.org/doc/draft-ietf-wish-whip/)-like media ingress
     - it's WHIP-"like" because there is no guarantee about spec compliance
     - but this project learned the idea from there
 * [WHEP](https://datatracker.ietf.org/doc/draft-murillo-whep/)-like media egress
     - it's WHEP-"like" because there is no guarantee about spec compliance
     - this project implemented similar idea before there is WHEP spec release
-* shared internal states across SFU instances (currently via Redis)
-* internal traffic routing across SFU instances (currently via NATS)
+* shared internal states across SFU instances (currently via Redis, can be extended)
+* internal traffic routing across SFU instances (currently via NATS, can be extended)
 
 
 Try It
