@@ -1,6 +1,9 @@
 WebRTC SFU: Cloud Native, Horizontal Scaling
 ============================================
 
+[![Build status](https://github.com/aioniclabs/webrtc-sfu/workflows/ci/badge.svg)](https://github.com/aioniclabs/webrtc-sfu/actions)
+
+
 A WebRTC SFU (Selective Forwarding Unit) server aim to be horizontal scalable.
 
 
