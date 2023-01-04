@@ -25,7 +25,7 @@ jobs:
           args: --release
       - run: |
           mkdir -p artifacts
-          mv ./target/release/webrtc-sfu artifacts
+          mv ./target/release/weever-streaming artifacts
           gzip -f artifacts/*
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
