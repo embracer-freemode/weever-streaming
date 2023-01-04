@@ -3712,39 +3712,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "webrtc-sfu"
-version = "0.1.0"
-dependencies = [
- "actix-cors",
- "actix-files",
- "actix-web",
- "actix-web-httpauth",
- "anyhow",
- "async-trait",
- "base64",
- "bincode 2.0.0-rc.2",
- "bytes",
- "clap",
- "console-subscriber",
- "futures",
- "log",
- "nats",
- "once_cell",
- "prometheus",
- "redis",
- "rustls 0.20.7",
- "rustls-pemfile",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-appender",
- "tracing-log",
- "tracing-subscriber",
- "webrtc",
-]
-
-[[package]]
 name = "webrtc-srtp"
 version = "0.9.0"
 source = "git+https://github.com/webrtc-rs/webrtc?rev=242db9d6#242db9d664c4e3ac69a8af731f4373b4c4ea9691"
@@ -3786,6 +3753,39 @@ dependencies = [
  "thiserror",
  "tokio",
  "winapi",
+]
+
+[[package]]
+name = "weever-streaming"
+version = "0.1.0"
+dependencies = [
+ "actix-cors",
+ "actix-files",
+ "actix-web",
+ "actix-web-httpauth",
+ "anyhow",
+ "async-trait",
+ "base64",
+ "bincode 2.0.0-rc.2",
+ "bytes",
+ "clap",
+ "console-subscriber",
+ "futures",
+ "log",
+ "nats",
+ "once_cell",
+ "prometheus",
+ "redis",
+ "rustls 0.20.7",
+ "rustls-pemfile",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-appender",
+ "tracing-log",
+ "tracing-subscriber",
+ "webrtc",
 ]
 
 [[package]]

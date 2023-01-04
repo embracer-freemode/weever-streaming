@@ -27,7 +27,7 @@ build-container:		## build container (via docker)
 	docker build . \
 		--network host \
 		--build-arg COMMIT_SHA=$(shell git log -1 --format="%H") \
-		-t webrtc-sfu
+		-t weever-streaming
 
 run:								## run native instance (needs Redis and NATS)
 	env RUST_LOG=debug,actix_web=debug,webrtc_mdns=error,webrtc_srtp=debug \
@@ -40,7 +40,7 @@ run-container:		## run container (needs Redis and NATS)
 	docker run \
 		--network host \
 		--env RUST_LOG=debug \
-		-it webrtc-sfu
+		-it weever-streaming
 
 run-compose:				## run docker-compose
 	docker-compose up

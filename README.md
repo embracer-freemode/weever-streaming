@@ -1,7 +1,7 @@
-WebRTC SFU: Cloud Native, Horizontal Scaling
-============================================
+Weever Streaming: Cloud Native, Horizontal Scaling, SFU
+=======================================================
 
-[![Build status](https://github.com/aioniclabs/webrtc-sfu/actions/workflows/rust-check.yml/badge.svg)](https://github.com/aioniclabs/webrtc-sfu/actions)
+[![Build status](https://github.com/embracer-freemode/weever-streaming/actions/workflows/rust-check.yml/badge.svg)](https://github.com/embracer-freemode/weever-streaming/actions)
 
 
 A WebRTC SFU (Selective Forwarding Unit) server aim to be horizontal scalable.
@@ -38,8 +38,8 @@ Try It
 ========================================
 
 ```sh
-git clone https://github.com/aioniclabs/webrtc-sfu
-cd webrtc-sfu
+git clone https://github.com/embracer-freemode/weever-streaming
+cd weever-streaming
 
 # you need to install "docker-compose" first
 # this will launch: 1 Redis, 3 NATS, 3 WebRTC SFU

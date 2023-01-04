@@ -56,7 +56,7 @@ services:
       retries: 5
     command: "--cluster_name NATS --cluster nats://0.0.0.0:6222 --routes nats://nats1:6222,nats://nats2:6222,nats://nats3:6222"
   sfu1:
-    image: ghcr.io/aioniclabs/webrtc-sfu:latest
+    image: ghcr.io/embracer-freemode/weever-streaming:latest
     restart: always
     ports:
       - "8443:8443"
@@ -66,7 +66,7 @@ services:
       nats1:
         condition: service_healthy
     command: |
-      webrtc-sfu
+      weever-streaming
       --debug
       --port 8443
       --cert-file certs/cert.pem
@@ -74,7 +74,7 @@ services:
       --redis redis://redis
       --nats nats1
   sfu2:
-    image: ghcr.io/aioniclabs/webrtc-sfu:latest
+    image: ghcr.io/embracer-freemode/weever-streaming:latest
     restart: always
     ports:
       - "8444:8444"
@@ -84,7 +84,7 @@ services:
       nats2:
         condition: service_healthy
     command: |
-      webrtc-sfu
+      weever-streaming
       --debug
       --port 8444
       --cert-file certs/cert.pem
@@ -92,7 +92,7 @@ services:
       --redis redis://redis
       --nats nats2
   sfu3:
-    image: ghcr.io/aioniclabs/webrtc-sfu:latest
+    image: ghcr.io/embracer-freemode/weever-streaming:latest
     restart: always
     ports:
       - "8445:8445"
@@ -102,7 +102,7 @@ services:
       nats3:
         condition: service_healthy
     command: |
-      webrtc-sfu
+      weever-streaming
       --debug
       --port 8445
       --cert-file certs/cert.pem
