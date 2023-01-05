@@ -61,10 +61,12 @@ services:
     ports:
       - "8443:8443"
     depends_on:
-      redis:
-        condition: service_healthy
-      nats1:
-        condition: service_healthy
+      # redis:
+      #   condition: service_healthy
+      # nats1:
+      #   condition: service_healthy
+      - redis
+      - nats1
     command: |
       weever-streaming
       --debug
@@ -79,10 +81,12 @@ services:
     ports:
       - "8444:8444"
     depends_on:
-      redis:
-        condition: service_healthy
-      nats2:
-        condition: service_healthy
+      # redis:
+      #   condition: service_healthy
+      # nats2:
+      #   condition: service_healthy
+      - redis
+      - nats2
     command: |
       weever-streaming
       --debug
@@ -97,10 +101,12 @@ services:
     ports:
       - "8445:8445"
     depends_on:
-      redis:
-        condition: service_healthy
-      nats3:
-        condition: service_healthy
+      # redis:
+      #   condition: service_healthy
+      # nats3:
+      #   condition: service_healthy
+      - redis
+      - nats3
     command: |
       weever-streaming
       --debug
