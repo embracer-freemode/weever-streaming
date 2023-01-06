@@ -1,4 +1,4 @@
-# Deployment (Kubernetes)
+# Kubernetes
 
 * SFU can be deployed with StatefulSet.
 * Override the SSL certs in Pod.

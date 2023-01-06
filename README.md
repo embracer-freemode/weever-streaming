@@ -74,7 +74,9 @@ docker-compose up
 Deployment
 ========================================
 
-See [deployment docs](./docs/deployment.md)
+* [Docker Compose](./docs/deploy/docker-compose.md)
+* [Docker Swarm](./docs/deploy/docker-swarm.md)
+* [Kubernetes](./docs/deploy/kubernetes.md)
 
 
 Special Thanks
