@@ -3,17 +3,10 @@ Weever Streaming: Cloud Native, Horizontal Scaling, SFU
 
 [![Build status](https://github.com/embracer-freemode/weever-streaming/actions/workflows/rust-check.yml/badge.svg)](https://github.com/embracer-freemode/weever-streaming/actions)
 
+Weever Streaming is a Open Source WebRTC SFU (Selective Forwarding Unit).
+It serves for broadcasting, video conferencing, ... etc.
+It's easy to deploy and scalable.
 
-A WebRTC SFU (Selective Forwarding Unit) server aim to be horizontal scalable.
-
-
-Goal
-========================================
-
-The original goal is to have a WebRTC SFU server that's easy to run on Kubernetes.
-And it doesn't need complex control for scaling.
-Kubernetes can add more SFU pods based on loading, and things just work.
-Clients can connect to any pod, they don't need to be in same instance.
 
 
 Features
@@ -58,7 +51,7 @@ cd weever-streaming
 #
 docker-compose up
 
-# visit website:
+# visit website (publisher & subscriber can be in different instance):
 #
 # * https://localhost:8443/
 # * https://localhost:8444/
@@ -77,6 +70,22 @@ Deployment
 * [Docker Compose](./docs/deploy/docker-compose.md)
 * [Docker Swarm](./docs/deploy/docker-swarm.md)
 * [Kubernetes](./docs/deploy/kubernetes.md)
+
+
+Development
+========================================
+
+Compile
+------------------------------
+
+```sh
+cargo build
+```
+
+CI
+------------------------------
+
+[GitHub Actions](https://github.com/embracer-freemode/weever-streaming/actions)
 
 
 Special Thanks
