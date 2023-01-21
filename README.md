@@ -1,13 +1,24 @@
-Weever Streaming: Cloud Native, Horizontal Scaling, SFU
-=======================================================
+Weever Streaming: Cloud Native, Horizontal Scaling, WebRTC SFU
+==============================================================
 
 [![Build status](https://github.com/embracer-freemode/weever-streaming/actions/workflows/rust-check.yml/badge.svg)](https://github.com/embracer-freemode/weever-streaming/actions)
 
 Weever Streaming is a Open Source WebRTC SFU (Selective Forwarding Unit).
-It serves for broadcasting, video conferencing, ... etc.
-It's easy to deploy and scalable.
+It serves for broadcasting, video conferencing, or regular video/audio/data streaming ... etc. It's easy to deploy and scale.
 
+You can come up with your own streaming products/platforms easily with it, as long as you are familiar with html, css, javascript, and web service hosting. Client examples can be found at [site/index.html](https://github.com/embracer-freemode/weever-streaming/blob/develop/site/index.html) and [site/management.html](https://github.com/embracer-freemode/weever-streaming/blob/develop/site/management.html).
 
+Currently, Weever Streaming can be deployed with docker-compose in a single machine, or with docker swarm mode to be running on multiple machines. Last but not the least, it can also be deployed to kubernetes shall you wish to go totally cloud native.
+
+Similar or Related Projects We Know of
+========================================
+
+- [Janus](https://janus.conf.meetecho.com/): the general purpose WebRTC server
+- [Jitsi](https://jitsi.org/): Video Conferencing Software
+
+The downside of Janus is that horizontal scaling was a little bit of pain, and Jitsi was designed for video conferencing, it was a bit hard to take it apart and build our own applications with it last time we checked.
+
+Weever Streaming is released with MIT and Apache V2, with only 2 html/js code examples. Hooking the code into your own UI and integrating into your own `jwt` auth logic is also straightforward.
 
 Features
 ========================================
@@ -86,6 +97,14 @@ CI
 ------------------------------
 
 [GitHub Actions](https://github.com/embracer-freemode/weever-streaming/actions)
+
+
+TODOs
+========================================
+
+- [ ] an awesome basic UI for user to come and get impressed
+- [ ] a video tutorial for each deployment method
+- [ ] beef up the doc for Kubernetes deployment
 
 
 Special Thanks
