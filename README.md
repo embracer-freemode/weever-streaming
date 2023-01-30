@@ -110,21 +110,21 @@ API
 Public HTTP API
 ------------------------------
 
-| HTTP | Endpoint         | Usage                                           |
-| ---- | ---------------- | ----------------------------------------------- |
-| POST | /pub/<room>/<id> | Connect WebRTC as Publisher for <room> as <id>  |
-| POST | /sub/<room>/<id> | Connect WebRTC as Subscriber for <room> as <id> |
+| HTTP | Endpoint           | Usage                                               |
+| ---- | ------------------ | --------------------------------------------------- |
+| POST | `/pub/<room>/<id>` | Connect WebRTC as Publisher for `<room>` as `<id>`  |
+| POST | `/sub/<room>/<id>` | Connect WebRTC as Subscriber for `<room>` as `<id>` |
 
 
 Private HTTP API
 ------------------------------
 
-| HTTP | Endpoint         | Usage                                                       |
-| ---- | ---------------- | ----------------------------------------------------------- |
-| POST | /create/pub      | Set authentication token for Publisher for <room> for <id>  |
-| POST | /create/sub      | Set authentication token for Subscriber for <room> for <id> |
-| GET  | /list/pub/<room> | Show publisher list of <room>                               |
-| GET  | /list/sub/<room> | Show subscriber list of <room>                              |
+| HTTP | Endpoint           | Usage                                                           |
+| ---- | ------------------ | --------------------------------------------------------------- |
+| POST | `/create/pub`      | Set authentication token for Publisher for `<room>` for `<id>`  |
+| POST | `/create/sub`      | Set authentication token for Subscriber for `<room>` for `<id>` |
+| GET  | `/list/pub/<room>` | Show publisher list of `<room>`                                 |
+| GET  | `/list/sub/<room>` | Show subscriber list of `<room>`                                |
 
 
 Development
