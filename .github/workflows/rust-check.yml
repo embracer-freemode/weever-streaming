@@ -85,4 +85,5 @@ jobs:
 
   release-container:
     name: Release Container
+    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/container-build.yml
