@@ -1,12 +1,44 @@
-Weever Streaming: Cloud Native, Horizontal Scaling, SFU
-=======================================================
+Weever Streaming: Cloud Native, Horizontal Scaling, WebRTC SFU
+==============================================================
 
 [![Build status](https://github.com/embracer-freemode/weever-streaming/actions/workflows/rust-check.yml/badge.svg)](https://github.com/embracer-freemode/weever-streaming/actions)
 
 Weever Streaming is a Open Source WebRTC SFU (Selective Forwarding Unit).
-It serves for broadcasting, video conferencing, ... etc.
-It's easy to deploy and scalable.
+It serves for broadcasting, video conferencing, or regular video/audio/data streaming ... etc. It's easy to deploy and scale.
 
+You can come up with your own streaming products/platforms easily with it, as long as you are familiar with html, css, javascript, and web service hosting. Client examples can be found at [site/index.html](https://github.com/embracer-freemode/weever-streaming/blob/develop/site/index.html) and [site/management.html](https://github.com/embracer-freemode/weever-streaming/blob/develop/site/management.html).
+
+Currently, Weever Streaming can be deployed with docker-compose in a single machine, or with docker swarm mode to be running on multiple machines. Last but not the least, it can also be deployed to kubernetes shall you wish to go totally cloud native.
+
+
+Similar or Related Projects We Know of
+========================================
+
+* [Janus](https://janus.conf.meetecho.com/): the general purpose WebRTC server
+* [Jitsi](https://jitsi.org/): Video Conferencing Software
+
+
+When we created Weever Streaming,
+most of the popular WebRTC SFU projects scale by "room".
+Different video room can be in different instance,
+but all the clients in same room must connect to same instance.
+They are not easily horizontal scalable, and sometime needs management works.
+
+Janus supports wide range features. But the horizontal scaling part was a little bit of pain.
+Before Janus v1.0, horizontal scaling needs to be done via RTP forwards + Streaming mountpoint.
+It needs some management works.
+After Janus v1.1, new APIs for remote publisher are added.
+However, it still need some management, and more complex than Weever Streaming.
+
+Jitsi comes with good and deep video conferencing integration.
+But it was a bit hard to tailor it for our own applications last time we checked.
+Jitsi without Octo (it's called relays now, cascaded bridges), can't easily do horizontal scaling.
+It needs to deploy with sharding architecture.
+After Jitsi added Octo/Relays, the streams can be routed between instances.
+However, it's still a complex solution. It's more complex than we need.
+
+Weever Streaming is released with MIT and Apache V2, with only 2 html/js code examples.
+Hooking the code into your own UI and integrating into your own `jwt` auth logic is also straightforward.
 
 
 Features
@@ -72,6 +104,29 @@ Deployment
 * [Kubernetes](./docs/deploy/kubernetes.md)
 
 
+API
+========================================
+
+Public HTTP API
+------------------------------
+
+| HTTP | Endpoint           | Usage                                               |
+| ---- | ------------------ | --------------------------------------------------- |
+| POST | `/pub/<room>/<id>` | Connect WebRTC as Publisher for `<room>` as `<id>`  |
+| POST | `/sub/<room>/<id>` | Connect WebRTC as Subscriber for `<room>` as `<id>` |
+
+
+Private HTTP API
+------------------------------
+
+| HTTP | Endpoint           | Usage                                                           |
+| ---- | ------------------ | --------------------------------------------------------------- |
+| POST | `/create/pub`      | Set authentication token for Publisher for `<room>` for `<id>`  |
+| POST | `/create/sub`      | Set authentication token for Subscriber for `<room>` for `<id>` |
+| GET  | `/list/pub/<room>` | Show publisher list of `<room>`                                 |
+| GET  | `/list/sub/<room>` | Show subscriber list of `<room>`                                |
+
+
 Development
 ========================================
 
@@ -86,6 +141,14 @@ CI
 ------------------------------
 
 [GitHub Actions](https://github.com/embracer-freemode/weever-streaming/actions)
+
+
+TODOs
+========================================
+
+* [ ] an awesome basic UI for user to come and get impressed
+* [ ] a video tutorial for each deployment method
+* [ ] beef up the doc for Kubernetes deployment
 
 
 Special Thanks

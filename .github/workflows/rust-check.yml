@@ -1,6 +1,6 @@
 name: Check and Test and Lint
 
-on: [push, pull_request]
+on: [pull_request]
 
 jobs:
   check:
@@ -85,4 +85,5 @@ jobs:
 
   release-container:
     name: Release Container
+    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/container-build.yml
