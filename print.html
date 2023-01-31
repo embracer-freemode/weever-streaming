@@ -1,0 +1,370 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Weever Streaming</title>
+        <meta name="robots" content="noindex" />
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+    </head>
+    <body>
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded "><div><strong aria-hidden="true">1.</strong> Getting Started</div></li><li><ol class="section"><li class="chapter-item expanded "><div><strong aria-hidden="true">1.1.</strong> Introduction</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">1.2.</strong> Server Setup</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">1.3.</strong> Client Setup</div></li></ol></li><li class="chapter-item expanded "><a href="concepts/concepts.html"><strong aria-hidden="true">2.</strong> Concepts</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="concepts/webrtc-sfu.html"><strong aria-hidden="true">2.1.</strong> WebRTC SFU</a></li><li class="chapter-item expanded "><a href="concepts/sdp.html"><strong aria-hidden="true">2.2.</strong> SDP</a></li><li class="chapter-item expanded "><a href="concepts/ice.html"><strong aria-hidden="true">2.3.</strong> ICE</a></li><li class="chapter-item expanded "><a href="concepts/stun.html"><strong aria-hidden="true">2.4.</strong> STUN</a></li><li class="chapter-item expanded "><a href="concepts/turn.html"><strong aria-hidden="true">2.5.</strong> TURN</a></li><li class="chapter-item expanded "><a href="concepts/publisher-subscriber.html"><strong aria-hidden="true">2.6.</strong> Publisher & Subscriber</a></li><li class="chapter-item expanded "><a href="concepts/room.html"><strong aria-hidden="true">2.7.</strong> Room</a></li><li class="chapter-item expanded "><a href="concepts/multistream.html"><strong aria-hidden="true">2.8.</strong> Multistream</a></li><li class="chapter-item expanded "><a href="concepts/webrtc-renegotiation.html"><strong aria-hidden="true">2.9.</strong> WebRTC Renegotiation</a></li><li class="chapter-item expanded "><a href="concepts/whip-whep.html"><strong aria-hidden="true">2.10.</strong> WHIP & WHEP</a></li><li class="chapter-item expanded "><a href="concepts/client-as-sdp-offer-first.html"><strong aria-hidden="true">2.11.</strong> Client as SDP Offer first</a></li><li class="chapter-item expanded "><a href="concepts/authentication.html"><strong aria-hidden="true">2.12.</strong> Authentication</a></li></ol></li><li class="chapter-item expanded "><div><strong aria-hidden="true">3.</strong> Server</div></li><li><ol class="section"><li class="chapter-item expanded "><div><strong aria-hidden="true">3.1.</strong> Room Management</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">3.2.</strong> Dependencies</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">3.3.</strong> Redis sharing</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">3.4.</strong> NATS routing</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">3.5.</strong> Public HTTP API</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">3.6.</strong> Private HTTP API</div></li><li class="chapter-item expanded "><a href="server/data-channel-api.html"><strong aria-hidden="true">3.7.</strong> Data Channel API</a></li><li class="chapter-item expanded "><div><strong aria-hidden="true">3.8.</strong> Scaling</div></li></ol></li><li class="chapter-item expanded "><div><strong aria-hidden="true">4.</strong> Client</div></li><li><ol class="section"><li class="chapter-item expanded "><div><strong aria-hidden="true">4.1.</strong> Join as Publisher</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">4.2.</strong> Join as Subscriber</div></li></ol></li><li class="chapter-item expanded "><div><strong aria-hidden="true">5.</strong> Use Cases</div></li><li><ol class="section"><li class="chapter-item expanded "><div><strong aria-hidden="true">5.1.</strong> Audio Chat</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">5.2.</strong> Video Conferencing</div></li><li class="chapter-item expanded "><div><strong aria-hidden="true">5.3.</strong> Broadcasting</div></li></ol></li><li class="chapter-item expanded "><div><strong aria-hidden="true">6.</strong> Deployment</div></li><li><ol class="section"><li class="chapter-item expanded "><div><strong aria-hidden="true">6.1.</strong> Single Machine</div></li><li class="chapter-item expanded "><a href="deployment/docker-compose.html"><strong aria-hidden="true">6.2.</strong> Docker Compose</a></li><li class="chapter-item expanded "><a href="deployment/docker-swarm.html"><strong aria-hidden="true">6.3.</strong> Docker Swarm</a></li><li class="chapter-item expanded "><a href="deployment/kubernetes.html"><strong aria-hidden="true">6.4.</strong> Kubernetes</a></li></ol></li><li class="chapter-item expanded "><div><strong aria-hidden="true">7.</strong> Metrics</div></li><li><ol class="section"><li class="chapter-item expanded "><div><strong aria-hidden="true">7.1.</strong> Prometheus</div></li></ol></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Weever Streaming</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="concepts"><a class="header" href="#concepts">Concepts</a></h1>
+<p>We will explain some WebRTC related concepts and Weever Streaming only concepts in this sections.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="webrtc-sfu-selective-forwarding-unit"><a class="header" href="#webrtc-sfu-selective-forwarding-unit">WebRTC SFU (Selective Forwarding Unit)</a></h1>
+<p>SFU is a server to help forwarding media.
+It can communicate with clients to decide which media need forwarding.</p>
+<p>For more details information please checkout <a href="https://bloggeek.me/webrtcglossary/sfu/">SFU (Selective Forwarding Unit) • BlogGeek.me</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="sdp-session-description-protocol"><a class="header" href="#sdp-session-description-protocol">SDP (Session Description Protocol)</a></h1>
+<p>SDP is a widely adopted standard for describing the multimedia of the connection.</p>
+<p>For more details information please checkout <a href="https://webrtchacks.com/sdp-anatomy/">Anatomy of a WebRTC SDP</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="ice-interactive-connectivity-establishment-protocol"><a class="header" href="#ice-interactive-connectivity-establishment-protocol">ICE (Interactive Connectivity Establishment) Protocol</a></h1>
+<p>ICE is a framework to allow peer to connect with another peer.
+The ICE candidate will describe potential network path for connection.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="stun-session-traversal-utilities-for-nat"><a class="header" href="#stun-session-traversal-utilities-for-nat">STUN (Session Traversal Utilities for NAT)</a></h1>
+<p>STUN is a protocol to discover peer's public address and determine any restrictions in the router.</p>
+<p>For more details information please checkout <a href="https://bloggeek.me/webrtcglossary/stun/">STUN • BlogGeek.me</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="turn--traversal-using-relays-around-nat"><a class="header" href="#turn--traversal-using-relays-around-nat">TURN  (Traversal Using Relays around NAT)</a></h1>
+<p>TURN is a relay server to bypass the Symmetric NAT restriction.</p>
+<p>For more details information please checkout <a href="https://bloggeek.me/webrtc-turn/">WebRTC TURN: Why you NEED it and when you DON’T need it</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="publisher--subscriber"><a class="header" href="#publisher--subscriber">Publisher &amp; Subscriber</a></h1>
+<p>Publisher and Subscriber are the only two roles in Weever Streaming.</p>
+<p>Depends on use cases, the application can run both publisher and subscriber at the same time.</p>
+<h2 id="publisher"><a class="header" href="#publisher">Publisher</a></h2>
+<p>Publisher <strong>push</strong> media to Weever Streaming.
+The media can be audio, video, or both.</p>
+<h2 id="subscriber"><a class="header" href="#subscriber">Subscriber</a></h2>
+<p>Subscriber <strong>pull</strong> media from Weever Streaming.
+The media can be audio, video, or both.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="room"><a class="header" href="#room">Room</a></h1>
+<p>A room in Weever Streaming maintains states of participating publishers/subscribers.</p>
+<p>There is no different for hosting audio or video for a room.
+A room can serve both audio and video.</p>
+<p>There is no publishers or subscribers amount limitation for a room.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="multistream"><a class="header" href="#multistream">Multistream</a></h1>
+<p>Multistream means putting arbitrary amount of audio/video tracks in the same PeerConnection. <br />
+(It's done via <a href="https://datatracker.ietf.org/doc/html/draft-roach-mmusic-unified-plan-00">Unified Plan</a> of SDP)</p>
+<p>Combine with the widely adopted RTP BUNDLE and RTCP multiplexing.
+This means we can serve both audio and video at the same time,
+plus the control protocol,
+for any amount of peers' media all in &quot;one single socket connection&quot;.</p>
+<p>In Weever Streaming,
+the <a href="concepts/./publisher-subscriber.html#subscriber">subscribers</a> will leverage multistream
+for receiving all audio/video (from multiple <a href="concepts/./publisher-subscriber.html#publisher">publishers</a>) in single connection.</p>
+<p>By Weever Streaming convention,
+the stream id in SDP will be the publisher id.
+So subscriber can identify each stream after parsing the SDP.
+This also means subscribers can use info in SDP to know all the publishers.</p>
+<p>To keep it simple,
+publishers in Weever Streaming still use 1 connection for each outgoing streams.
+Only subscribers fully leverage the multistream.</p>
+<p>When a publisher join or leave,
+server will trigger <a href="concepts/./webrtc-renegotiation.html">WebRTC Renegotiation</a> for subscribers.
+New SDP will be sent via Data Channel.
+Subscribers can use new SDP to get latest streams status in the room.</p>
+<p>For more information about multistream, you can checkout Janus's article <a href="https://www.meetecho.com/blog/multistream/">Multistream is here!</a>.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="webrtc-renegotiation"><a class="header" href="#webrtc-renegotiation">WebRTC Renegotiation</a></h1>
+<p>After WebRTC is connected,
+you can still update the SDP for latest media status.</p>
+<p>To achieve WebRTC Renegotiation,
+you simply go through the WebRTC Negotiation flow one more time.
+Send SDP Offer to the other peer. Receive and set SDP Answer.</p>
+<p>The SDP Offer can be initiated by any peer,
+not necessary the peer who sent SDP Offer in first setup.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="whip--whep"><a class="header" href="#whip--whep">WHIP &amp; WHEP</a></h1>
+<h2 id="whip-webrtc-http-ingestion-protocol"><a class="header" href="#whip-webrtc-http-ingestion-protocol">WHIP (WebRTC-HTTP Ingestion Protocol)</a></h2>
+<p>The <a href="https://datatracker.ietf.org/doc/draft-ietf-wish-whip/">WHIP</a>
+is a spec for pushing WebRTC-based media into services.
+It provides a spec for WebRTC signaling with HTTP protocol and Bearer Token in pushing to services scenario.</p>
+<p>Weever Streaming has WHIP-like media ingress.
+It's WHIP-&quot;like&quot; because there is no guarantee about spec compliance at the moment.
+But this project learned the idea from there.</p>
+<p>And it's possible to use WHIP clients to publish audio/video to Weever Streaming.</p>
+<p>WHIP Clients:</p>
+<ul>
+<li><a href="https://github.com/meetecho/simple-whip-client">simple-whip-client</a> (GStreamer based)
+<ul>
+<li><code>./whip-client -u https://localhost:8443/pub/testroom/user1 -t mytoken -V &quot;videotestsrc is-live=true pattern=smpte ! videoconvert ! video/x-raw,width=1280,height=720,framerate=60/1 ! queue ! vp8enc deadline=1 ! rtpvp8pay pt=96 ssrc=2 ! queue ! application/x-rtp,media=video,encoding-name=VP8,payload=96&quot;</code></li>
+</ul>
+</li>
+</ul>
+<h2 id="whep-webrtc-http-egress-protocol"><a class="header" href="#whep-webrtc-http-egress-protocol">WHEP (WebRTC-HTTP Egress Protocol)</a></h2>
+<p>The <a href="https://datatracker.ietf.org/doc/draft-murillo-whep/">WHEP</a>
+is a spec for pulling WebRTC-based media from services.
+It provides a spec for WebRTC signaling with HTTP protocol and Bearer Token in pulling from services scenario.
+(The pulling version of WHIP.)</p>
+<p>Weever Streaming has WHEP-like media egress.
+It's WHEP-&quot;like&quot; because there is no guarantee about spec compliance at the moment.
+Weever Streaming implemented similar idea before there is WHEP spec release.</p>
+<p>And it's possible to use WHEP clients to pull audio/video from Weever Streaming.
+But WHEP doesn't include renegotiation, so WHEP clients can't update media on the fly.</p>
+<p>WHEP Clients:</p>
+<ul>
+<li><a href="https://github.com/meetecho/simple-whep-client">simple-whep-client</a> (GStreamer based)
+<ul>
+<li><code>./whep-client -u https://localhost:8443/sub/testroom/user2 -t mytoken</code></li>
+</ul>
+</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="client-as-sdp-offer-first"><a class="header" href="#client-as-sdp-offer-first">Client as SDP Offer first</a></h1>
+<p>In Weever Streaming, the clients always will be the SDP Offer side for connection setup.
+No matter the clients want to be publisher or subscriber.
+This make clients WebRTC connection setup to be 1 HTTP POST and response.</p>
+<p>After WebRTC is connected, Weever Streaming will use Data Channel for following WebRTC Renegotiation.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="authentication"><a class="header" href="#authentication">Authentication</a></h1>
+<p>Weever Streaming's authentication is done via Bearer Token.</p>
+<p>Server can set the token for each publisher/subscriber.</p>
+<p>Client connect to Weever Streaming with <code>Authorization: Bearer &lt;token&gt;</code> in HTTP headers.</p>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="data-channel-api"><a class="header" href="#data-channel-api">Data Channel API</a></h1>
+<p>A data channel labeled as &quot;<strong>control</strong>&quot; will be setup from server.
+This data channel will be used for WebRTC Renegotiation or other connection actions.</p>
+<h2 id="publisher-1"><a class="header" href="#publisher-1">Publisher</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Command</th><th>Server/Client Send</th><th>Usage</th></tr></thead><tbody>
+<tr><td>SDP_OFFER</td><td>Client Send</td><td>WebRTC Renegotiation</td></tr>
+<tr><td>SDP_ANSWER</td><td>Server Send</td><td>WebRTC Renegotiation</td></tr>
+<tr><td>STOP</td><td>Client Send</td><td>Actively close peer connection. (There is connection timeout for leaving peers even without this command.)</td></tr>
+<tr><td>OK</td><td>Server Send</td><td>Let client know server received the message but there is no special actions.</td></tr>
+</tbody></table>
+</div>
+<h2 id="subscriber-1"><a class="header" href="#subscriber-1">Subscriber</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Command</th><th>Server/Client Send</th><th>Usage</th></tr></thead><tbody>
+<tr><td>SDP_OFFER</td><td>Server Send</td><td>WebRTC Renegotiation</td></tr>
+<tr><td>SDP_ANSWER</td><td>Client Send</td><td>WebRTC Renegotiation</td></tr>
+<tr><td>STOP</td><td>Client Send</td><td>Actively close peer connection. (There is connection timeout for leaving peers even without this command.)</td></tr>
+<tr><td>OK</td><td>Server Send</td><td>Let client know server received the message but there is no special actions.</td></tr>
+</tbody></table>
+</div><div style="break-before: page; page-break-before: always;"></div><h1 id="deploy-with-docker-compose"><a class="header" href="#deploy-with-docker-compose">Deploy with Docker Compose</a></h1>
+<h2 id="start-your-docker-daemon"><a class="header" href="#start-your-docker-daemon">Start your docker daemon</a></h2>
+<pre><code class="language-bash"># start your docker daemon
+sudo systemctl start docker
+</code></pre>
+<h2 id="bring-up-weever-streaming"><a class="header" href="#bring-up-weever-streaming">Bring up Weever Streaming</a></h2>
+<pre><code class="language-bash"># run in the root folder of the project, the one with &quot;docker-compose.yml&quot; in it
+docker-compose up
+# check status
+docker-compose ls
+docker-compose ps
+docker-compose logs -f sfu1
+</code></pre>
+<h2 id="remove-weever-streaming"><a class="header" href="#remove-weever-streaming">Remove Weever Streaming</a></h2>
+<pre><code class="language-bash">docker-compose down
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="deploy-with-docker-swarm"><a class="header" href="#deploy-with-docker-swarm">Deploy with Docker Swarm</a></h1>
+<h2 id="start-up-docker-swarm-mode"><a class="header" href="#start-up-docker-swarm-mode">Start up docker swarm mode</a></h2>
+<pre><code class="language-bash"># start your docker daemon
+sudo systemctl start docker
+# run docker swarm node
+docker swarm init
+</code></pre>
+<h2 id="have-all-the-nodes-you-want-join-the-swarm"><a class="header" href="#have-all-the-nodes-you-want-join-the-swarm">Have all the nodes you want join the swarm</a></h2>
+<pre><code class="language-bash"># (optional) join the cluster in another machine
+docker swarm join --token &lt;token&gt; &lt;ip:port&gt;
+</code></pre>
+<h2 id="deploy-weever-streaming-up"><a class="header" href="#deploy-weever-streaming-up">Deploy Weever Streaming up</a></h2>
+<pre><code class="language-bash"># run in the root folder of the project, the one with &quot;docker-compose.yml&quot; in it
+docker stack deploy --compose-file docker-compose.yml weever-streaming
+
+# check status
+docker stack ls
+docker stack services weever-streaming
+docker stack ps weever-streaming
+docker service logs -f weever-streaming_sfu1
+</code></pre>
+<h2 id="remove-weever-streaming-from-the-swarm"><a class="header" href="#remove-weever-streaming-from-the-swarm">Remove Weever Streaming from the swarm</a></h2>
+<pre><code class="language-bash">docker stack rm weever-streaming
+</code></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="kubernetes"><a class="header" href="#kubernetes">Kubernetes</a></h1>
+<p>(TODO: add helm chart in)</p>
+<ul>
+<li>SFU can be deployed with StatefulSet.</li>
+<li>Override the SSL certs in Pod.</li>
+<li>A LoadBalancer in front of public web server.</li>
+<li>Setup liveness/readiness probe, point to SFU private web server.</li>
+<li>Setup preStop hook, point to SFU private web server.</li>
+<li>NATS instance can be another service or SFU Pod sidecar.</li>
+<li>Redis instance can be another service.</li>
+<li>HPA based on CPU usage, dynamically grows the Pod count.</li>
+<li>Can use other complex mechanism to control minimum Pod count if you need to schedule big events. For example, a cronjob to read business data and calculate a desired minimum Pod count.</li>
+<li>Use/Setup TURN server if needed.</li>
+<li>Authentication can be enabled via <code>--auth</code>. It's using Bearer Token mechanism. Token can be set via private web server. Data will be saved in Redis (1 day TTL).</li>
+<li>Management can be done via another service that talks to SFU via private web server.</li>
+<li>CORS can be set via <code>--cors-domain &lt;DOMAIN&gt;</code></li>
+<li>Most of configs can be set via both CLI arguments and environment variables.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            window.setTimeout(window.print, 100);
+        });
+        </script>
+
+    </body>
+</html>
