@@ -365,6 +365,7 @@ impl PublisherDetails {
         let user = self.user.clone();
         let notify_close = self.notify_close.clone();
         let created = self.created;
+        let mut is_closed = false;
 
         Box::new(move |s: RTCPeerConnectionState| {
             let _enter = span.enter(); // populate user & room info in following logs
@@ -399,10 +400,19 @@ impl PublisherDetails {
                 RTCPeerConnectionState::Failed
                 | RTCPeerConnectionState::Disconnected
                 | RTCPeerConnectionState::Closed => {
+                    // a quick hack to avoid sending duplicate PUB_LEFT
+                    // when state goes to disconnected, and then goes to closed in very short time
+                    if is_closed {
+                        return Box::pin(async {});
+                    }
+
+                    is_closed = true;
+
                     // NOTE:
                     // In disconnected state, PeerConnection may still come back, e.g. reconnect using an ICE Restart.
                     // But let's cleanup everything for now.
                     info!("send close notification");
+
                     notify_close.notify_waiters();
 
                     // TODO: also remove the media from state?
