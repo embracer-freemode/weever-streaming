@@ -11,6 +11,9 @@ You can come up with your own streaming products/platforms easily with it, as lo
 Currently, Weever Streaming can be deployed with docker-compose in a single machine, or with docker swarm mode to be running on multiple machines. Last but not the least, it can also be deployed to kubernetes shall you wish to go totally cloud native.
 
 
+For more information, please checkout [**documentation**](https://embracer-freemode.github.io/weever-streaming).
+
+
 Similar or Related Projects We Know of
 ========================================
 
@@ -99,32 +102,9 @@ docker-compose up
 Deployment
 ========================================
 
-* [Docker Compose](./docs/deploy/docker-compose.md)
-* [Docker Swarm](./docs/deploy/docker-swarm.md)
-* [Kubernetes](./docs/deploy/kubernetes.md)
-
-
-API
-========================================
-
-Public HTTP API
-------------------------------
-
-| HTTP | Endpoint           | Usage                                               |
-| ---- | ------------------ | --------------------------------------------------- |
-| POST | `/pub/<room>/<id>` | Connect WebRTC as Publisher for `<room>` as `<id>`  |
-| POST | `/sub/<room>/<id>` | Connect WebRTC as Subscriber for `<room>` as `<id>` |
-
-
-Private HTTP API
-------------------------------
-
-| HTTP | Endpoint           | Usage                                                           |
-| ---- | ------------------ | --------------------------------------------------------------- |
-| POST | `/create/pub`      | Set authentication token for Publisher for `<room>` for `<id>`  |
-| POST | `/create/sub`      | Set authentication token for Subscriber for `<room>` for `<id>` |
-| GET  | `/list/pub/<room>` | Show publisher list of `<room>`                                 |
-| GET  | `/list/sub/<room>` | Show subscriber list of `<room>`                                |
+* [Docker Compose](https://embracer-freemode.github.io/weever-streaming/deployment/docker-compose.html)
+* [Docker Swarm](https://embracer-freemode.github.io/weever-streaming/deployment/docker-swarm.html)
+* [Kubernetes](https://embracer-freemode.github.io/weever-streaming/deployment/kubernetes.html)
 
 
 Development

@@ -1,0 +1,6 @@
+[book]
+authors = ["Chiu-Hsiang Hsu"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Weever Streaming"

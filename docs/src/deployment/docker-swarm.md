@@ -16,7 +16,7 @@ docker swarm init
 docker swarm join --token <token> <ip:port>
 ```
 
-## Deploy Weever-streaming up
+## Deploy Weever Streaming up
 
 ```bash
 # run in the root folder of the project, the one with "docker-compose.yml" in it
@@ -29,7 +29,7 @@ docker stack ps weever-streaming
 docker service logs -f weever-streaming_sfu1
 ```
 
-## remove Weever-streaming from the swarm
+## Remove Weever Streaming from the swarm
 
 ```bash
 docker stack rm weever-streaming

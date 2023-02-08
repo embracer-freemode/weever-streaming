@@ -1,5 +1,7 @@
 # Kubernetes
 
+(TODO: add helm chart in)
+
 * SFU can be deployed with StatefulSet.
 * Override the SSL certs in Pod.
 * A LoadBalancer in front of public web server.
