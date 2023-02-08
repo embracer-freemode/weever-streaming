@@ -17,6 +17,7 @@ class WeeverPeerConnection {
     this.role = null;
     this.room = null;
     this.id = null;
+    this.full_id = null;
     this.token = null;
     // callback for publisher
     this.onPubStream = null;  // published (outgoing) stream, for local display
@@ -120,7 +121,7 @@ class WeeverPeerConnection {
         let offer = pc.localDescription;
 
         // use a trailing random id to avoid duplication from same publisher
-        client.id = client.id  + "+" + (+new Date).toString(36);
+        client.full_id = client.id  + "+" + (+new Date).toString(36);
 
         client.sendSDPOffer(offer);
       }
@@ -196,7 +197,29 @@ class WeeverPeerConnection {
 
   // screen share
   publish_screen(constraints) {
-    // TODO
+    let log = msg => this._log(msg);
+    let _catch = this.onError;
+    let client = this;
+    client.role = WeeverRole.Publisher;
+    navigator.mediaDevices.getDisplayMedia(constraints)
+      .then(stream => {
+        stream.getTracks().forEach(track => client.pc.addTrack(track, stream));
+
+        if (client.onPubStream) {
+          client.onPubStream(stream);
+        }
+
+        // time profiling
+        client.timestamp = performance.now();
+
+        client.pc.createOffer()
+          .then(offer => {
+            log("local SDP Offer:" + offer.sdp);
+            // set local SDP offer
+            // this will trigger ICE gathering, and then onicecandidate callback
+            client.pc.setLocalDescription(offer).catch(_catch);
+          }).catch(_catch);
+      }).catch(_catch);
   }
 
   subscribe() {
@@ -256,7 +279,7 @@ class WeeverPeerConnection {
     let _catch = e => this.onError(e);
     let pc = this.pc;
     // send to Weever Streaming
-    let _url = `${this.url}/${this.role}/${this.room}/${this.id}`;
+    let _url = `${this.url}/${this.role}/${this.room}/${this.full_id}`;
     log(`url ${_url}`);
     fetch(_url, {
       method: "POST",

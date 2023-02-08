@@ -5,8 +5,19 @@ function form_submit(event) {
   let form = event.srcElement;
   let data = new FormData(form);
 
+  let settings = {
+    room: data.get("room"),
+    id: data.get("id"),
+    token: data.get("token"),
+    url: ".",
+    constraints: null,
+    debug: true,
+  }
+
   // cache for weever streaming clients for later clean up
-  let connections = [];
+  let pub_default;
+  let pub_screen;
+  let sub;
 
   // hide the form
   form.style.display = "none";
@@ -21,62 +32,88 @@ function form_submit(event) {
     document.getElementById("sub-media").textContent = "";
     document.getElementById("pub-media").textContent = "";
     // close connection
-    connections.forEach((client) => {
-      client.close();
+    [sub, pub_default, pub_screen].forEach((client) => {
+      if (client) {
+        try {
+          sub.close();
+        } catch (error) {
+          console.log(error);
+        }
+      }
     });
   }
 
   // hook "toggle video" button in bottom bar
   document.getElementById("camera").onclick = () => {
     // the publisher client
-    let client = connections[1];
-    let video_track = client.pc.getLocalStreams()[0].getVideoTracks()[0];
-    let state = !video_track.enabled;
-    video_track.enabled = state;
-    if (state) {
-      document.getElementById("cameraOn").style.display = "";
-      document.getElementById("cameraOff").style.display = "none";
-    } else {
-      document.getElementById("cameraOn").style.display = "none";
-      document.getElementById("cameraOff").style.display = "";
-    }
+    let client = pub_default;
+    client.pc.getSenders().forEach((sender) => {
+      if (sender.track.kind == "video") {
+        let state = !sender.track.enabled;
+        sender.track.enabled = state;
+        if (state) {
+          document.getElementById("cameraOn").style.display = "";
+          document.getElementById("cameraOff").style.display = "none";
+        } else {
+          document.getElementById("cameraOn").style.display = "none";
+          document.getElementById("cameraOff").style.display = "";
+        }
+      }
+    });
   }
 
   // hook "toggle audio" button in bottom bar
   document.getElementById("microphone").onclick = () => {
     // the publisher client
-    let client = connections[1];
-    let audio_track = client.pc.getLocalStreams()[0].getAudioTracks()[0];
-    let state = !audio_track.enabled;
-    audio_track.enabled = state;
+    let client = pub_default;
+    client.pc.getSenders().forEach((sender) => {
+      if (sender.track.kind == "audio") {
+        let state = !sender.track.enabled;
+        sender.track.enabled = state;
+        if (state) {
+          document.getElementById("microphoneOn").style.display = "";
+          document.getElementById("microphoneOff").style.display = "none";
+        } else {
+          document.getElementById("microphoneOn").style.display = "none";
+          document.getElementById("microphoneOff").style.display = "";
+        }
+      }
+    });
+  }
+
+  // hook "toggle screen share" button in bottom bar
+  document.getElementById("screen").onclick = () => {
+    let state = document.getElementById("screenOn").style.display == "";
     if (state) {
-      document.getElementById("microphoneOn").style.display = "";
-      document.getElementById("microphoneOff").style.display = "none";
+      // start screen share
+      settings.constraints = { audio: false, video: true }
+      pub_screen = example_pub(settings, screen=true);
+      document.getElementById("screenOn").style.display = "none";
+      document.getElementById("screenOff").style.display = "";
     } else {
-      document.getElementById("microphoneOn").style.display = "none";
-      document.getElementById("microphoneOff").style.display = "";
+      // the publisher client
+      let client = pub_screen;
+      client.close();
+      // stop screen share
+      document.getElementById("screenOn").style.display = "";
+      document.getElementById("screenOff").style.display = "none";
+      // remove video
+      document.getElementById(`pub-media-${client.id}-screen`).remove();
     }
   }
 
   // detect use case selection for different settings
   let useCase = data.get("useCase");
-  let settings = {
-    room: data.get("room"),
-    id: data.get("id"),
-    token: data.get("token"),
-    url: ".",
-    constraints: null,
-    debug: true,
-  }
-
   // 1, Video Conferencing
   if (useCase == 1) {
     // enable both pub/sub
-    connections.push(example_sub(settings));
+    sub = example_sub(settings);
     settings.constraints = { audio: true, video: true }
-    connections.push(example_pub(settings));
+    pub_default = example_pub(settings);
     // show "toggle video" button
     document.getElementById("camera").style.display = "";
+    // show "screen share" button
+    document.getElementById("screen").style.display = "";
     // show "toggle audio" button
     document.getElementById("microphone").style.display = "";
   }
@@ -84,11 +121,13 @@ function form_submit(event) {
   else if (useCase == 2) {
     // enable both pub/sub
     // disable video in pub
-    connections.push(example_sub(settings));
+    sub = example_sub(settings);
     settings.constraints = { audio: true, video: false }
-    connections.push(example_pub(settings));
+    pub_default = example_pub(settings);
     // hide "toggle video" button
     document.getElementById("camera").style.display = "none";
+    // hide "screen share" button
+    document.getElementById("screen").style.display = "none";
     // show "toggle audio" button
     document.getElementById("microphone").style.display = "";
   }
@@ -97,19 +136,23 @@ function form_submit(event) {
     let role = data.get("broadcastingRole");
     // 1, Broadcaster
     if (role == 1) {
-      connections.push(example_sub(settings));
+      sub = example_sub(settings);
       settings.constraints = { audio: Boolean(data.get("enableAudio")), video: Boolean(data.get("enableVideo")) }
-      connections.push(example_pub(settings));
+      pub_default = example_pub(settings);
       // hide/show "toggle video" button
       document.getElementById("camera").style.display = data.get("enableVideo") ? "" : "none";
+      // hide/show "screen share" button
+      document.getElementById("screen").style.display = data.get("enableVideo") ? "" : "none";
       // hide/show "toggle audio" button
       document.getElementById("microphone").style.display = data.get("enableAudio") ? "" : "none";
     }
     // 2, Viewer/Listener
     else if (role == 2) {
-      connections.push(example_sub(settings));
+      sub = example_sub(settings);
       // hide "toggle video" button
       document.getElementById("camera").style.display = "none";
+      // hide "screen share" button
+      document.getElementById("screen").style.display =  "none";
       // hide "toggle audio" button
       document.getElementById("microphone").style.display = "none";
     }
@@ -118,18 +161,22 @@ function form_submit(event) {
   else if (useCase == 4) {
     // enable pub only
     settings.constraints = { audio: Boolean(data.get("enableAudio")), video: Boolean(data.get("enableVideo")) }
-    connections.push(example_pub(settings));
+    pub_default = example_pub(settings);
     // hide/show "toggle video" button
     document.getElementById("camera").style.display = data.get("enableVideo") ? "" : "none";
+    // hide/show "scree share" button
+    document.getElementById("screen").style.display = data.get("enableVideo") ? "" : "none";
     // hide/show "toggle audio" button
     document.getElementById("microphone").style.display = data.get("enableAudio") ? "" : "none";
   }
   // 5, (Raw) Subscriber
   else if (useCase == 5) {
     // enable sub only
-    connections.push(example_sub(settings));
+    sub = example_sub(settings);
     // hide "toggle video" button
     document.getElementById("camera").style.display = "none";
+    // hide "screen share" button
+    document.getElementById("screen").style.display =  "none";
     // hide "toggle audio" button
     document.getElementById("microphone").style.display = "none";
   }
@@ -225,7 +272,7 @@ function example_sub(settings) {
 }
 
 // example for running publisher with UI change
-function example_pub(settings) {
+function example_pub(settings, screen=false) {
   document.getElementById("pub-media").style.display = "";
   let client = new WeeverPeerConnection();
   client.setUrl(settings.url);
@@ -234,11 +281,13 @@ function example_pub(settings) {
   client.setToken(settings.token);
   client.setDebug(settings.debug);
   client.onPubStream = stream => {
+    let id_suffix = screen ? "screen" : "default";
+    let str_suffix = screen ? "'s screen" : "";
     let elem = document.createElement("div")
     // HTML template for publisher local media
     elem.innerHTML = `
-      <div id="pub-media-${client.id}">
-          ${client.id}
+      <div id="pub-media-${client.id}-${id_suffix}">
+          ${client.id}${str_suffix}
           <video style="width: 30%"></video>
           <audio></audio>
       </div>
@@ -255,6 +304,12 @@ function example_pub(settings) {
     _notify(`Got error: ${error}`);
     document.getElementById("leave").click();
   };
-  client.publish(settings.constraints);
+  if (screen) {
+    // it's screen share
+    client.publish_screen(settings.constraints);
+  } else {
+    // it's not screen share
+    client.publish(settings.constraints);
+  }
   return client;
 }
