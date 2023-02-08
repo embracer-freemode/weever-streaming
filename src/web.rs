@@ -261,9 +261,11 @@ async fn publish(
     path: web::Path<(String, String)>,
     sdp: web::Bytes,
 ) -> impl Responder {
-    let (room, id) = path.into_inner();
+    let (room, full_id) = path.into_inner();
     // <user>+<random> => <user>
-    let id = id.splitn(2, "+").take(1).next().unwrap_or("").to_string();
+    let id = full_id.splitn(2, "+").take(1).next().unwrap_or("");
+    // special screen share "-screen" suffix
+    let id = id.trim_end_matches("-screen").to_string();
 
     if id.is_empty() {
         return "id should not be empty"
@@ -329,8 +331,8 @@ async fn publish(
         }
     }
 
-    // check if there is another publisher in the room with same id
-    match SHARED_STATE.exist_publisher(&room, &id).await {
+    // check if there is another publisher in the room with same full id
+    match SHARED_STATE.exist_publisher(&room, &full_id).await {
         Ok(true) => {
             return "duplicate publisher"
                 .to_string()
@@ -410,9 +412,11 @@ async fn subscribe(
     path: web::Path<(String, String)>,
     sdp: web::Bytes,
 ) -> impl Responder {
-    let (room, id) = path.into_inner();
+    let (room, full_id) = path.into_inner();
     // <user>+<random> => <user>
-    let id = id.splitn(2, "+").take(1).next().unwrap_or("").to_string();
+    let id = full_id.splitn(2, "+").take(1).next().unwrap_or("");
+    // special screen share "-screen" suffix
+    let id = id.trim_end_matches("-screen").to_string();
 
     if id.is_empty() {
         return "id should not be empty"
@@ -479,7 +483,7 @@ async fn subscribe(
     }
 
     // check if there is another publisher in the room with same id
-    match SHARED_STATE.exist_subscriber(&room, &id).await {
+    match SHARED_STATE.exist_subscriber(&room, &full_id).await {
         Ok(true) => {
             return "duplicate subscriber"
                 .to_string()
