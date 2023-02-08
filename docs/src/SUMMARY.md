@@ -17,6 +17,7 @@
     - [Authentication](./concepts/authentication.md)
 - [Server](./server/server.md)
     - [Room Management](./server/room-management.md)
+    - [ID & Full ID](./server/id-full-id.md)
     - [Dependencies](./server/dependencies.md)
     - [States Sharing](./server/states-sharing/states-sharing.md)
         - [Redis](./server/states-sharing/redis.md)
