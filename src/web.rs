@@ -262,6 +262,8 @@ async fn publish(
     sdp: web::Bytes,
 ) -> impl Responder {
     let (room, id) = path.into_inner();
+    // <user>+<random> => <user>
+    let id = id.splitn(2, "+").take(1).next().unwrap_or("").to_string();
 
     if id.is_empty() {
         return "id should not be empty"
@@ -409,6 +411,8 @@ async fn subscribe(
     sdp: web::Bytes,
 ) -> impl Responder {
     let (room, id) = path.into_inner();
+    // <user>+<random> => <user>
+    let id = id.splitn(2, "+").take(1).next().unwrap_or("").to_string();
 
     if id.is_empty() {
         return "id should not be empty"
