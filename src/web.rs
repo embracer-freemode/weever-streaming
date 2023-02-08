@@ -112,15 +112,17 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
         // if the debug option is enabled, we show the demo site
         if cli.debug {
             app = app
+                // management APIs
+                .service(create_pub)
+                .service(create_sub)
+                .service(list_pub)
+                .service(list_sub)
+                // demo site
                 .service(
                     Files::new("/", "site")
                         .index_file("index.html")
                         .prefer_utf8(true),
-                ) // demo site
-                .service(create_pub)
-                .service(create_sub)
-                .service(list_pub)
-                .service(list_sub);
+                );
         }
 
         app
