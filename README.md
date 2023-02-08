@@ -40,7 +40,7 @@ It needs to deploy with sharding architecture.
 After Jitsi added Octo/Relays, the streams can be routed between instances.
 However, it's still a complex solution. It's more complex than we need.
 
-Weever Streaming is released with MIT and Apache V2, with only 2 html/js code examples.
+Weever Streaming is released with MIT and Apache V2, with only 2 HTML + 2 JS code examples.
 Hooking the code into your own UI and integrating into your own `jwt` auth logic is also straightforward.
 
 
