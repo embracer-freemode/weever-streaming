@@ -263,7 +263,7 @@ async fn publish(
 ) -> impl Responder {
     let (room, full_id) = path.into_inner();
     // <user>+<random> => <user>
-    let id = full_id.splitn(2, "+").take(1).next().unwrap_or("");
+    let id = full_id.splitn(2, '+').take(1).next().unwrap_or("");
     // special screen share "-screen" suffix
     let id = id.trim_end_matches("-screen").to_string();
 
@@ -419,7 +419,7 @@ async fn subscribe(
 ) -> impl Responder {
     let (room, full_id) = path.into_inner();
     // <user>+<random> => <user>
-    let id = full_id.splitn(2, "+").take(1).next().unwrap_or("");
+    let id = full_id.splitn(2, '+').take(1).next().unwrap_or("");
     // special screen share "-screen" suffix
     let id = id.trim_end_matches("-screen").to_string();
 
