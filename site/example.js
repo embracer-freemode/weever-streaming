@@ -299,12 +299,12 @@ function example_pub(settings, screen=false) {
     let elem_id = `pub-media-${id}-${id_suffix}`;
     elem.innerHTML = `
      <div id="${elem_id}" class="card text-bg-dark">
-       <div class="card-img-overlay d-flex flex-column">
-         <p class="card-text mt-auto text-center">${id}${str_suffix}</p>
-       </div>
        <div class="embed-responsive embed-responsive-16by9">
          <video class="embed-responsive-item w-100" autoplay="" controls="" style="transform : scaleX(-1);"></video>
          <audio style="display: none" autoplay="" controls=""></audio>
+       </div>
+       <div class="card-img-overlay d-flex flex-column">
+         <p class="card-text mt-auto text-center">${id}${str_suffix}</p>
        </div>
      </div>
       `.trim();
