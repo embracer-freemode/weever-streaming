@@ -314,7 +314,11 @@ async fn publish(
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
-    let user_token = if let Some(auth) = &auth { auth.token() } else { "" };
+    let user_token = if let Some(auth) = &auth {
+        auth.token()
+    } else {
+        ""
+    };
     if cli.auth {
         let token = SHARED_STATE.get_pub_token(&room, &id).await;
         if let Ok(token) = token {
@@ -466,7 +470,11 @@ async fn subscribe(
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
-    let user_token = if let Some(auth) = &auth { auth.token() } else { "" };
+    let user_token = if let Some(auth) = &auth {
+        auth.token()
+    } else {
+        ""
+    };
     if cli.auth {
         let token = SHARED_STATE.get_sub_token(&room, &id).await;
         if let Ok(token) = token {
