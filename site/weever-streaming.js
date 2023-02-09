@@ -152,15 +152,19 @@ class WeeverPeerConnection {
           const words = e.data.split(" ");
           let full_id = words[1];
           let id = full_id.split("+")[0];
+          let app = id.endsWith("-screen") ? "screen" : "default";
+          id = id.replace("-screen", "");
           if (client.onPubJoin) {
-            client.onPubJoin(id, full_id);
+            client.onPubJoin(id, full_id, app);
           }
         } else if (e.data.startsWith("PUB_LEFT ") == true) {
           const words = e.data.split(" ");
           let full_id = words[1];
           let id = full_id.split("+")[0];
+          let app = id.endsWith("-screen") ? "screen" : "default";
+          id = id.replace("-screen", "");
           if (client.onPubLeft) {
-            client.onPubLeft(id, full_id);
+            client.onPubLeft(id, full_id, app);
           }
         }
       }
@@ -200,6 +204,7 @@ class WeeverPeerConnection {
     let log = msg => this._log(msg);
     let _catch = this.onError;
     let client = this;
+    client.id = client.id + "-screen";
     client.role = WeeverRole.Publisher;
     navigator.mediaDevices.getDisplayMedia(constraints)
       .then(stream => {
@@ -246,9 +251,11 @@ class WeeverPeerConnection {
       log(`add track ${full_id} ${event.track.id}`);
 
       let id = full_id.split("+")[0];
+      let app = id.endsWith("-screen") ? "screen" : "default";
+      id = id.replace("-screen", "");
 
       if (client.onSubStream) {
-        client.onSubStream(event.streams[0], id, full_id, event);
+        client.onSubStream(event.streams[0], id, full_id, app, event);
       }
     }
 

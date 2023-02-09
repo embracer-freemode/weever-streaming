@@ -29,8 +29,8 @@ function form_submit(event) {
   document.getElementById("leave").onclick = () => {
     form.style.display = "";
     document.getElementById("utils").style.display = "none";
-    document.getElementById("sub-media").textContent = "";
-    document.getElementById("pub-media").textContent = "";
+    document.getElementById("media").style.display = "none";
+    document.getElementById("media").textContent = "";
     // close connection
     [sub, pub_default, pub_screen].forEach((client) => {
       if (client) {
@@ -206,36 +206,44 @@ function _notify(msg) {
   toast.show();
 }
 
+function update_layout(log) {
+  let all = document.getElementById("media");
+  let width = Math.ceil(Math.sqrt(all.childElementCount));
+  console.log(`set media layout width to ${width}`);
+  all.style.gridTemplateAreas = "'" + Array.from("a".repeat(width)).join(" ") + "'";
+}
+
 // example for running subscriber with UI change
 function example_sub(settings) {
-  let client = new WeeverPeerConnection();
+  document.getElementById("media").style.display = "grid";
 
-  function update_layout() {
-    let all = document.getElementById("sub-media");
-    let width = Math.floor(all.childElementCount/2) + 1;
-    client._log(`set media layout width to ${width}`);
-    all.style.gridTemplateAreas = "'" + Array.from("a".repeat(width)).join(" ") + "'";
-  }
+  let client = new WeeverPeerConnection();
 
   client.setUrl(settings.url);
   client.setRoom(settings.room);
   client.setId(settings.id);
   client.setToken(settings.token);
-  client.onSubStream = (stream, id, full_id, event) => {
+  client.onSubStream = (stream, id, full_id, app, event) => {
     var elem;
     elem = document.getElementById(`sub-media-${full_id}`)
     if (elem == null) {
       elem = document.createElement("div")
       // HTML template for publisher media
+      let str_suffix = app == "screen" ? "'s screen" : "";
+      let elem_id = `sub-media-${full_id}`;
       elem.innerHTML = `
-        <div id="sub-media-${full_id}">
-            ${id}
-            <video style="width: 30%"></video>
-            <audio style=""></audio>
-        </div>
+       <div id="${elem_id}" class="card text-bg-dark">
+         <div class="embed-responsive embed-responsive-16by9">
+           <video class="embed-responsive-item w-100" autoplay="" controls="" style="transform : scaleX(-1);"></video>
+           <audio style="display: none" autoplay="" controls=""></audio>
+         </div>
+         <div class="card-img-overlay d-flex flex-column">
+           <p class="card-text mt-auto text-center fs-5">${id}${str_suffix}</p>
+         </div>
+       </div>
         `.trim();
       elem = elem.firstChild;
-      document.getElementById("sub-media").appendChild(elem)
+      document.getElementById("media").appendChild(elem)
     }
 
     // the kind can be video or audio
@@ -248,11 +256,13 @@ function example_sub(settings) {
 
     update_layout();
   };
-  client.onPubJoin = (id, full_id) => {
-    _notify(`Publisher ${id} Joined.`);
+  client.onPubJoin = (id, full_id, app) => {
+    let suffix = app == "screen" ? "'s screen" : "";
+    _notify(`Publisher ${id}${suffix} Joined.`);
   };
-  client.onPubLeft = (id, full_id) => {
-    _notify(`Publisher ${id} Left.`);
+  client.onPubLeft = (id, full_id, app) => {
+    let suffix = app == "screen" ? "'s screen" : "";
+    _notify(`Publisher ${id}${suffix} Left.`);
 
     div = document.getElementById(`sub-media-${full_id}`);
     if (div != null) {
@@ -273,7 +283,7 @@ function example_sub(settings) {
 
 // example for running publisher with UI change
 function example_pub(settings, screen=false) {
-  document.getElementById("pub-media").style.display = "";
+  document.getElementById("media").style.display = "grid";
   let client = new WeeverPeerConnection();
   client.setUrl(settings.url);
   client.setRoom(settings.room);
@@ -281,23 +291,30 @@ function example_pub(settings, screen=false) {
   client.setToken(settings.token);
   client.setDebug(settings.debug);
   client.onPubStream = stream => {
+    let id = client.id;
     let id_suffix = screen ? "screen" : "default";
     let str_suffix = screen ? "'s screen" : "";
     let elem = document.createElement("div")
     // HTML template for publisher local media
+    let elem_id = `pub-media-${id}-${id_suffix}`;
     elem.innerHTML = `
-      <div id="pub-media-${client.id}-${id_suffix}">
-          ${client.id}${str_suffix}
-          <video style="width: 30%"></video>
-          <audio></audio>
-      </div>
+     <div id="${elem_id}" class="card text-bg-dark">
+       <div class="card-img-overlay d-flex flex-column">
+         <p class="card-text mt-auto text-center">${id}${str_suffix}</p>
+       </div>
+       <div class="embed-responsive embed-responsive-16by9">
+         <video class="embed-responsive-item w-100" autoplay="" controls="" style="transform : scaleX(-1);"></video>
+         <audio style="display: none" autoplay="" controls=""></audio>
+       </div>
+     </div>
       `.trim();
     elem = elem.firstChild;
     let media = elem.getElementsByTagName("video")[0];
     media.srcObject = stream;
     media.autoplay = true
     media.controls = true
-    document.getElementById("pub-media").appendChild(elem)
+    document.getElementById("media").appendChild(elem)
+    update_layout();
   };
   client._log(JSON.stringify(settings));
   client.onError = (error) => {
