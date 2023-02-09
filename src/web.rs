@@ -256,7 +256,7 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
 /// WebRTC WHIP compatible (sort of) endpoint for publisher connection
 #[post("/pub/{room}/{id}")]
 async fn publish(
-    auth: BearerAuth,
+    auth: Option<BearerAuth>,
     cli: web::Data<cli::CliOptions>,
     path: web::Path<(String, String)>,
     sdp: web::Bytes,
@@ -314,17 +314,18 @@ async fn publish(
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
+    let user_token = if let Some(auth) = &auth { auth.token() } else { "" };
     if cli.auth {
         let token = SHARED_STATE.get_pub_token(&room, &id).await;
         if let Ok(token) = token {
-            if token != auth.token() {
+            if (!token.is_empty()) && (token != user_token) {
                 return "bad token"
                     .to_string()
                     .customize()
                     .with_status(StatusCode::UNAUTHORIZED);
             }
         } else {
-            return "bad token"
+            return "bad token N/A"
                 .to_string()
                 .customize()
                 .with_status(StatusCode::BAD_REQUEST);
@@ -358,7 +359,7 @@ async fn publish(
                 .with_status(StatusCode::BAD_REQUEST);
         }
     };
-    debug!("pub: auth {} sdp {:.20?}", auth.token(), sdp);
+    debug!("pub: auth {} sdp {:.20?}", user_token, sdp);
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     // get a time based id to represent following Tokio task for this user
@@ -407,7 +408,7 @@ async fn publish(
 /// WebRTC WHEP compatible (sort of) endpoint for subscriber connection
 #[post("/sub/{room}/{id}")]
 async fn subscribe(
-    auth: BearerAuth,
+    auth: Option<BearerAuth>,
     cli: web::Data<cli::CliOptions>,
     path: web::Path<(String, String)>,
     sdp: web::Bytes,
@@ -465,17 +466,18 @@ async fn subscribe(
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
+    let user_token = if let Some(auth) = &auth { auth.token() } else { "" };
     if cli.auth {
         let token = SHARED_STATE.get_sub_token(&room, &id).await;
         if let Ok(token) = token {
-            if token != auth.token() {
+            if (!token.is_empty()) && (token != user_token) {
                 return "bad token"
                     .to_string()
                     .customize()
                     .with_status(StatusCode::UNAUTHORIZED);
             }
         } else {
-            return "bad token"
+            return "bad token N/A"
                 .to_string()
                 .customize()
                 .with_status(StatusCode::BAD_REQUEST);
@@ -509,7 +511,7 @@ async fn subscribe(
                 .with_status(StatusCode::BAD_REQUEST);
         }
     };
-    debug!("sub: auth {} sdp {:.20?}", auth.token(), sdp);
+    debug!("sub: auth {} sdp {:.20?}", user_token, sdp);
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     // get a time based id to represent following Tokio task for this user
