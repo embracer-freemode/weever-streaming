@@ -380,7 +380,7 @@ async fn publish(
     tokio::spawn(catch(publisher::webrtc_to_nats(
         cli.get_ref().clone(),
         room.clone(),
-        id.clone(),
+        full_id.clone(),
         sdp,
         tx,
         tid,
@@ -531,7 +531,7 @@ async fn subscribe(
     tokio::spawn(catch(subscriber::nats_to_webrtc(
         cli.get_ref().clone(),
         room.clone(),
-        id.clone(),
+        full_id.clone(),
         sdp,
         tx,
         tid,
