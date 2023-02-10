@@ -75,7 +75,7 @@ class WeeverPeerConnection {
 
     pc.onicegatheringstatechange = e => {
       let connection = e.target;
-      log("Connection State:" + connection.iceGatheringState);
+      log("ICE Gathering State:" + connection.iceGatheringState);
     };
 
     pc.onnegotiationneeded = e => {
@@ -112,13 +112,15 @@ class WeeverPeerConnection {
     pc.onicecandidate = function(event) {
       if (event.candidate) {
         log("trickle ICE: " + JSON.stringify(event.candidate));
-      } else {
+      }
+      if (event.target.iceGatheringState === "complete") {
         let now = performance.now();
         let duration = now - client.timestamp;
         log(`from createOffer() to full ICE collected: ${duration} ms (${client.timestamp} -> ${now})`);
 
         // all ICE candidates have been collected
         let offer = pc.localDescription;
+        log("full local SDP Offer:" + offer.sdp);
 
         // use a trailing random id to avoid duplication from same publisher
         client.full_id = client.id  + "+" + (+new Date).toString(36);
