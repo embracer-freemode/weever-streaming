@@ -98,6 +98,8 @@ docker-compose up
 
 [![SFU demo](https://user-images.githubusercontent.com/2716047/217735060-a8805054-9bdb-4ab2-87ca-06b241ce1594.mp4)](https://user-images.githubusercontent.com/2716047/217735060-a8805054-9bdb-4ab2-87ca-06b241ce1594.mp4)
 
+![demo-site](https://user-images.githubusercontent.com/2716047/217726798-47a3b770-30c8-4687-b149-1863e649d3dd.png)
+
 
 Deployment
 ========================================
