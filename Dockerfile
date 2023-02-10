@@ -31,4 +31,6 @@ ARG COMMIT_SHA
 RUN echo ${COMMIT_SHA} > /commit
 
 ENV RUST_LOG=info,webrtc_mdns=error,webrtc_srtp=info
-CMD weever-streaming --cert-file certs/cert.pem --key-file certs/key.pem
+ENV CERT_FILE=certs/cert.pem
+ENV KEY_FILE=certs/key.pem
+CMD weever-streaming
