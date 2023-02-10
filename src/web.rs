@@ -112,15 +112,17 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
         // if the debug option is enabled, we show the demo site
         if cli.debug {
             app = app
+                // management APIs
+                .service(create_pub)
+                .service(create_sub)
+                .service(list_pub)
+                .service(list_sub)
+                // demo site
                 .service(
                     Files::new("/", "site")
                         .index_file("index.html")
                         .prefer_utf8(true),
-                ) // demo site
-                .service(create_pub)
-                .service(create_sub)
-                .service(list_pub)
-                .service(list_sub);
+                );
         }
 
         app
@@ -254,12 +256,16 @@ async fn create_sub(params: web::Json<CreateSubParams>) -> impl Responder {
 /// WebRTC WHIP compatible (sort of) endpoint for publisher connection
 #[post("/pub/{room}/{id}")]
 async fn publish(
-    auth: BearerAuth,
+    auth: Option<BearerAuth>,
     cli: web::Data<cli::CliOptions>,
     path: web::Path<(String, String)>,
     sdp: web::Bytes,
 ) -> impl Responder {
-    let (room, id) = path.into_inner();
+    let (room, full_id) = path.into_inner();
+    // <user>+<random> => <user>
+    let id = full_id.splitn(2, '+').take(1).next().unwrap_or("");
+    // special screen share "-screen" suffix
+    let id = id.trim_end_matches("-screen").to_string();
 
     if id.is_empty() {
         return "id should not be empty"
@@ -308,25 +314,30 @@ async fn publish(
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
+    let user_token = if let Some(auth) = &auth {
+        auth.token()
+    } else {
+        ""
+    };
     if cli.auth {
         let token = SHARED_STATE.get_pub_token(&room, &id).await;
         if let Ok(token) = token {
-            if token != auth.token() {
+            if (!token.is_empty()) && (token != user_token) {
                 return "bad token"
                     .to_string()
                     .customize()
                     .with_status(StatusCode::UNAUTHORIZED);
             }
         } else {
-            return "bad token"
+            return "bad token N/A"
                 .to_string()
                 .customize()
                 .with_status(StatusCode::BAD_REQUEST);
         }
     }
 
-    // check if there is another publisher in the room with same id
-    match SHARED_STATE.exist_publisher(&room, &id).await {
+    // check if there is another publisher in the room with same full id
+    match SHARED_STATE.exist_publisher(&room, &full_id).await {
         Ok(true) => {
             return "duplicate publisher"
                 .to_string()
@@ -352,7 +363,7 @@ async fn publish(
                 .with_status(StatusCode::BAD_REQUEST);
         }
     };
-    debug!("pub: auth {} sdp {:.20?}", auth.token(), sdp);
+    debug!("pub: auth {} sdp {:.20?}", user_token, sdp);
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     // get a time based id to represent following Tokio task for this user
@@ -374,7 +385,7 @@ async fn publish(
     tokio::spawn(catch(publisher::webrtc_to_nats(
         cli.get_ref().clone(),
         room.clone(),
-        id.clone(),
+        full_id.clone(),
         sdp,
         tx,
         tid,
@@ -401,12 +412,16 @@ async fn publish(
 /// WebRTC WHEP compatible (sort of) endpoint for subscriber connection
 #[post("/sub/{room}/{id}")]
 async fn subscribe(
-    auth: BearerAuth,
+    auth: Option<BearerAuth>,
     cli: web::Data<cli::CliOptions>,
     path: web::Path<(String, String)>,
     sdp: web::Bytes,
 ) -> impl Responder {
-    let (room, id) = path.into_inner();
+    let (room, full_id) = path.into_inner();
+    // <user>+<random> => <user>
+    let id = full_id.splitn(2, '+').take(1).next().unwrap_or("");
+    // special screen share "-screen" suffix
+    let id = id.trim_end_matches("-screen").to_string();
 
     if id.is_empty() {
         return "id should not be empty"
@@ -455,17 +470,22 @@ async fn subscribe(
     // TODO: verify "Content-Type: application/sdp"
 
     // token verification
+    let user_token = if let Some(auth) = &auth {
+        auth.token()
+    } else {
+        ""
+    };
     if cli.auth {
         let token = SHARED_STATE.get_sub_token(&room, &id).await;
         if let Ok(token) = token {
-            if token != auth.token() {
+            if (!token.is_empty()) && (token != user_token) {
                 return "bad token"
                     .to_string()
                     .customize()
                     .with_status(StatusCode::UNAUTHORIZED);
             }
         } else {
-            return "bad token"
+            return "bad token N/A"
                 .to_string()
                 .customize()
                 .with_status(StatusCode::BAD_REQUEST);
@@ -473,7 +493,7 @@ async fn subscribe(
     }
 
     // check if there is another publisher in the room with same id
-    match SHARED_STATE.exist_subscriber(&room, &id).await {
+    match SHARED_STATE.exist_subscriber(&room, &full_id).await {
         Ok(true) => {
             return "duplicate subscriber"
                 .to_string()
@@ -499,7 +519,7 @@ async fn subscribe(
                 .with_status(StatusCode::BAD_REQUEST);
         }
     };
-    debug!("sub: auth {} sdp {:.20?}", auth.token(), sdp);
+    debug!("sub: auth {} sdp {:.20?}", user_token, sdp);
     let (tx, rx) = tokio::sync::oneshot::channel();
 
     // get a time based id to represent following Tokio task for this user
@@ -521,7 +541,7 @@ async fn subscribe(
     tokio::spawn(catch(subscriber::nats_to_webrtc(
         cli.get_ref().clone(),
         room.clone(),
-        id.clone(),
+        full_id.clone(),
         sdp,
         tx,
         tid,

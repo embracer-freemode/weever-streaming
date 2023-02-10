@@ -1,135 +1,167 @@
-<h2>Create publisher (per publisher security token setting for pushing streams)</h2>
-(this will only be called from other in-cluster service for settings)<br/>
-room: <input id="create_pub_room" type="text"></input><br/>
-id: <input id="create_pub_id" type="text"></input><br/>
-token: <input id="create_pub_token" type="text"></input><br/>
-<button onclick="window.createPublisher()">Create Publisher</button><br/><br/>
-Logs:<br/>
-<div id="create_pub_log"></div>
-<script>
-window.createPublisher = () => {
-  let log = msg => {
-    document.getElementById("create_pub_log").innerHTML += msg + "<br>"
-  }
+<!DOCTYPE html>
+<html data-bs-theme="dark">
+  <head>
+    <meta charset="UTF-8">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-GLhlTQ8iRABdZLl6O3oVMWSktQOp6b7In1Zl3/Jr59b6EGGoI1aFkw7cmDA6j6gD" crossorigin="anonymous">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js" integrity="sha384-w76AqPfDkMBDXo30jS1Sgez6pr3x5MlQ1ZAGC+nuZB+EYdgRZgiwxhTBTkF7CXvN" crossorigin="anonymous"></script>
+    <script src="weever-streaming.js" crossorigin="anonymous"></script>
+    <script src="example.js" crossorigin="anonymous"></script>
+    <title>Weever Streaming</title>
+  </head>
 
-  let room = document.getElementById("create_pub_room").value;
-  let id = document.getElementById("create_pub_id").value;
-  let token = document.getElementById("create_pub_token").value;
-  let params = {
-      "room": room,
-      "id": id,
-      "token": token,
-  };
+  <body>
+    <!-- head bar -->
+    <nav class="navbar navbar-expand-lg bg-body-tertiary">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="/index.html">Weever Streaming</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarNav">
+          <ul class="navbar-nav">
+            <li class="nav-item dropdown">
+              <a class="nav-link" href="/">Demo (Use Cases)</a>
+            </li>
+            <li class="nav-item dropdown">
+              <a class="nav-link" href="/management.html">Demo (Management)</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="https://embracer-freemode.github.io/weever-streaming">Documentation</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" href="https://github.com/embracer-freemode/weever-streaming">Source Code</a>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </nav>
 
-  fetch("/create/pub", {
-    method: "POST",
-    headers: {
-      "Accept": "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(params),
-  }).then(res => {
-    log(`Request complete! URL ${res.url} status ${res.status}`);
-    res.text().then(function(answer) {
-      log(answer);
-    })
-  });
-}
-</script>
-<hr>
+    <div class="container mt-3 mb-3">
+      <legend>Demo (Management)</legend>
+      <nav>
+        <div class="nav nav-tabs" id="nav-tab" role="tablist">
+          <button class="nav-link active" id="nav-set-tab" data-bs-toggle="tab" data-bs-target="#nav-set" type="button" role="tab" aria-controls="nav-set" aria-selected="true">Set Token</button>
+          <button class="nav-link" id="nav-list-tab" data-bs-toggle="tab" data-bs-target="#nav-list" type="button" role="tab" aria-controls="nav-list" aria-selected="false">List Publishers/Subscribers</button>
+        </div>
+      </nav>
+      <div class="tab-content mt-1" id="nav-tabContent">
+        <div class="tab-pane fade show active" id="nav-set" role="tabpanel" aria-labelledby="nav-set-tab" tabindex="0">
+          <form id="setForm" class="container" onsubmit="return create(event);" action="">
+            <div class="mb-3">
+              <label for="role" class="form-label">Role</label>
+              <select id="role" name="role" class="form-select" aria-label="Role" required>
+                <option hidden disabled selected value>-- choose a role --</option>
+                <option value="pub">Publisher</option>
+                <option value="sub">Subscriber</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="room" class="form-label">Room ID</label>
+              <input id="room" name="room" type="text" class="form-control" placeholder="The room id string, for example: myroom1234" aria-label="Room ID" required>
+            </div>
+            <div class="mb-3">
+              <label for="id" class="form-label">User ID</label>
+              <input id="id" name="id" type="text" class="form-control" placeholder="The user id string, for example: user1234" aria-label="User ID" required>
+            </div>
+            <div class="mb-3">
+              <label for="token" class="form-label">Token</label>
+              <input id="token" name="token" type="text" class="form-control" placeholder="The Bearer Token for connect, if any" aria-label="Token">
+            </div>
+            <button type="submit" class="btn btn-primary">Set Token</button>
+          </form>
+        </div>
+        <div class="tab-pane fade" id="nav-list" role="tabpanel" aria-labelledby="nav-list-tab" tabindex="0">
+          <form id="listForm" class="container" onsubmit="return list(event);" action="">
+            <div class="mb-3">
+              <label for="role" class="form-label">Role</label>
+              <select id="role" name="role" class="form-select" aria-label="Role" required>
+                <option hidden disabled selected value>-- choose a role --</option>
+                <option value="pub">Publisher</option>
+                <option value="sub">Subscriber</option>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label for="room" class="form-label">Room ID</label>
+              <input id="room" name="room" type="text" class="form-control" placeholder="The room id string, for example: myroom1234" aria-label="Room ID" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Query</button>
+          </form>
+          <script>
+            function create(event) {
+              let form = event.srcElement;
+              let data = new FormData(form);
+              let object = {};
+              data.forEach((value, key) => object[key] = value);
+              let json = JSON.stringify(object);
 
-<!-- ---------- -->
+              fetch(`/create/${data.get("role")}`, {
+                method: "POST",
+                headers: {
+                  "Accept": "application/json",
+                  "Content-Type": "application/json",
+                },
+                body: json,
+              }).then(res => {
+                console.log(`Request complete! URL ${res.url} status ${res.status}`);
+                res.text().then(function(answer) {
+                  console.log(answer);
+                  if (answer == "pub set" || answer == "sub set") {
+                    answer = "done";
+                  }
+                  _notify(`Set Token for ${data.get("role")} of room ${data.get("room")} result: ${answer}`);
+                })
+              });
 
-<h2>Create subscriber (per subscriber security token setting for pulling streams)</h2>
-(this will only be called from other in-cluster service for settings)<br/>
-room: <input id="create_sub_room" type="text"></input><br/>
-id: <input id="create_sub_id" type="text"></input><br/>
-token: <input id="create_sub_token" type="text"></input><br/>
-<button onclick="window.createSubscriber()">Create Subscriber</button><br/><br/>
-Logs:<br/>
-<div id="create_sub_log"></div>
-<script>
-window.createSubscriber = () => {
-  let log = msg => {
-    document.getElementById("create_sub_log").innerHTML += msg + "<br>"
-  }
+              return false;
+            }
 
-  let room = document.getElementById("create_sub_room").value;
-  let id = document.getElementById("create_sub_id").value;
-  let token = document.getElementById("create_sub_token").value;
-  let params = {
-      "room": room,
-      "id": id,
-      "token": token,
-  };
+            function list(event) {
+              let form = event.srcElement;
+              let data = new FormData(form);
 
-  fetch("/create/sub", {
-    method: "POST",
-    headers: {
-      "Accept": "application/json",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(params),
-  }).then(res => {
-    log(`Request complete! URL ${res.url} status ${res.status}`);
-    res.text().then(function(answer) {
-      log(answer);
-    })
-  });
-}
-</script>
-<hr>
+              fetch(`/list/${data.get("role")}/${data.get("room")}`, {
+                method: "GET",
+              }).then(res => {
+                console.log(`Request complete! URL ${res.url} status ${res.status}`);
+                res.text().then(function(answer) {
+                  console.log(answer);
+                  if (!answer) {
+                    answer = "N/A";
+                  }
+                  _notify(`List ${data.get("role")} of room ${data.get("room")} result: ${answer}`);
+                })
+              });
 
-<!-- ---------- -->
+              return false;
+            }
 
-<h2>List Publishers</h2>
-room: <input id="list_pubs_room" type="text"></input><br/>
-<button onclick="window.listPublishers()">List Publishers</button><br/><br/>
-Logs:<br/>
-<div id="list_pubs_log"></div>
-<script>
-window.listPublishers = () => {
-  let log = msg => {
-    document.getElementById("list_pubs_log").innerHTML += msg + "<br>"
-  }
+            function _notify(msg) {
+              let notification = document.createElement("div");
+              // HTML template for a join notification
+              notification.innerHTML = `
+                <div class="toast bg-info" role="alert" aria-live="assertive" aria-atomic="true">
+                  <div class="toast-header">
+                    <strong class="me-auto">Weever Streaming</strong>
+                    <small class="text-muted">just now</small>
+                    <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+                  </div>
+                  <div class="toast-body text-dark">
+                    ${msg}
+                  </div>
+                </div>
+                `.trim();
+              notification = notification.firstChild;
+              let toast = new bootstrap.Toast(notification);
+              document.getElementById("notification").appendChild(notification);
+              toast.show();
+            }
+          </script>
+        </div>
+      </div>
+    </div>
 
-  let room = document.getElementById("list_pubs_room").value;
+    <div class="toast-container position-fixed bottom-0 end-0 p-3" id="notification">
+    </div>
 
-  fetch(`/list/pub/${room}`, {
-    method: "GET",
-  }).then(res => {
-    log(`Request complete! URL ${res.url} status ${res.status}`);
-    res.text().then(function(answer) {
-      log(answer);
-    })
-  });
-}
-</script>
-<hr>
-
-<!-- ---------- -->
-
-<h2>List Subscribers</h2>
-room: <input id="list_subs_room" type="text"></input><br/>
-<button onclick="window.listSubscribers()">List Subscribers</button><br/><br/>
-Logs:<br/>
-<div id="list_subs_log"></div>
-<script>
-window.listSubscribers = () => {
-  let log = msg => {
-    document.getElementById("list_subs_log").innerHTML += msg + "<br>"
-  }
-
-  let room = document.getElementById("list_subs_room").value;
-
-  fetch(`/list/sub/${room}`, {
-    method: "GET",
-  }).then(res => {
-    log(`Request complete! URL ${res.url} status ${res.status}`);
-    res.text().then(function(answer) {
-      log(answer);
-    })
-  });
-}
-</script>
-<hr>
+  </body>
+</html>
