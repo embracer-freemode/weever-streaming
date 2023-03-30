@@ -79,7 +79,11 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
     info!("private URL {private_url}");
     let public_server = HttpServer::new(move || {
         let data = web::Data::new(cli.clone());
-        let cors_domain = format!("//{}", cli.cors_domain);
+        let cors_domain = if cli.cors_domain.starts_with('.') {
+            cli.cors_domain.to_string()
+        } else {
+            format!(".{}", cli.cors_domain)
+        };
         // set CORS for easier frontend development
         let cors = Cors::default()
             .allowed_origin_fn(move |origin, _req_head| {
@@ -95,7 +99,8 @@ pub async fn web_main(cli: cli::CliOptions) -> Result<()> {
                 // e.g. "http://localhost" or "https://localhost" or "https://localhost:3000"
                 //
                 // and a allow any host with explicit set cors_domain
-                matches!(domain, "//localhost") || matches!(domain, _ if domain == cors_domain)
+                matches!(domain, "//localhost")
+                    || matches!(domain, _ if domain.ends_with(cors_domain.as_str()))
             })
             .allowed_methods(vec!["GET", "POST"])
             .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
